@@ -28,7 +28,7 @@ use typed_store::traits::Map;
 use typed_store::traits::TypedStoreDebug;
 use typed_store_derive::DBMapUtils;
 
-use sui_types::base_types::{ObjectRef, TransactionDigest};
+use sui_types::base_types::{ObjectID, ObjectRef, TransactionDigest};
 use sui_types::batch::TxSequenceNumber;
 use sui_types::committee::EpochId;
 use sui_types::error::{SuiError, SuiResult};
@@ -340,7 +340,15 @@ impl LockServiceImpl {
 
         let write_batch = write_batch.insert_batch(
             &self.transaction_lock,
-            objects.iter().map(|obj_ref| (obj_ref, None)),
+            objects.iter().map(|obj_ref| {
+                if obj_ref.0
+                    == ObjectID::from_hex_literal("0x1a1096087b3df46667da611b10b760bfc3ce8088")
+                        .unwrap()
+                {
+                    error!(object = ?obj_ref, "creating lock");
+                }
+                (obj_ref, None)
+            }),
         )?;
 
         Ok(write_batch)
