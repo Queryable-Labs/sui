@@ -75,7 +75,7 @@ debug = 1
 # Write debug info into a separate file.
 split-debuginfo = 'packed'
 # Without stripping, sui binary size would be > 1GB.
-strip = 'debuginfo'
+# strip = 'debuginfo'
 # Exit process with SIGABRT when any thread panics
 panic = 'abort'
 
@@ -119,9 +119,9 @@ fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "12c522be
 fastcrypto-zkp = { git = "https://github.com/MystenLabs/fastcrypto", rev = "12c522bea01e4a3d19ecae63d789edcdcce2d66c", package = "fastcrypto-zkp" }
 
 # anemo dependencies
-anemo = { git = "https://github.com/mystenlabs/anemo.git", rev = "87d60b249a9954775a95790e3bc9ca1a0df7969f" }
-anemo-build = { git = "https://github.com/mystenlabs/anemo.git", rev = "87d60b249a9954775a95790e3bc9ca1a0df7969f" }
-anemo-tower = { git = "https://github.com/mystenlabs/anemo.git", rev = "87d60b249a9954775a95790e3bc9ca1a0df7969f" }
+anemo = { git = "https://github.com/mwtian/anemo.git", rev = "4a7d508a9c6a72afe56c3db69dda4721b89c2e3f" }
+anemo-build = { git = "https://github.com/mwtian/anemo.git", rev = "4a7d508a9c6a72afe56c3db69dda4721b89c2e3f" }
+anemo-tower = { git = "https://github.com/mwtian/anemo.git", rev = "4a7d508a9c6a72afe56c3db69dda4721b89c2e3f" }
 
 # Use the same workspace-hack across crates.
 workspace-hack = { path = "crates/workspace-hack" }
