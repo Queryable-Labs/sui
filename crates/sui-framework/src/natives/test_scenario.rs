@@ -674,6 +674,7 @@ fn find_all_wrapped_objects<'a>(
                     return if depth == 0 {
                         debug_assert!(!fields.is_empty());
                         // all object values so the first field is a UID that should be skipped
+                        // TODO: should this panic?
                         &fields[1..]
                     } else {
                         fields

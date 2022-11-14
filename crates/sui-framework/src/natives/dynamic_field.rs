@@ -95,6 +95,7 @@ pub fn hash_type_and_key(
 
     // truncate into an ObjectID and return
     let id = ObjectID::try_from(&hash.as_ref()[0..ObjectID::LENGTH]).unwrap();
+    // TODO: should this panic?
     Ok(NativeResult::ok(
         legacy_emit_cost(),
         smallvec![Value::address(id.into())],

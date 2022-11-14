@@ -279,7 +279,15 @@ impl ConsensusAdapter {
         tx_digest: &TransactionDigest,
     ) -> bool {
         // the 32 is as requirement of the deault StdRng::from_seed choice
-        let digest_bytes: [u8; 32] = tx_digest.to_bytes()[..32].try_into().unwrap();
+        let digest_bytes: [u8; 32] = if let Some(b) = tx_digest.to_bytes().get(0..32) {
+            if let Ok(d) = b.try_into() {
+                d
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        };
 
         // permute the validators deterministically, based on the digest
         let mut rng = StdRng::from_seed(digest_bytes);
