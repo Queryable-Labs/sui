@@ -648,12 +648,19 @@ impl PrimaryReceiverHandler {
             DagError::TooOld(header.digest().into(), header.round, narwhal_round)
         );
 
-        // Check the parent certificates. Ensure the parents form a quorum and are all from the
-        // previous round.
+        // Check the parent certificates. Ensure the parents:
+        // - form a quorum
+        // - are all from the previous round
+        // - are from unique authorities
+        let mut parent_authorities = BTreeSet::new();
         let mut stake = 0;
-        for parent in parents {
+        for parent in parents.iter() {
             ensure!(
                 parent.round() + 1 == header.round,
+                DagError::MalformedHeader(header.digest())
+            );
+            ensure!(
+                parent_authorities.insert(&parent.header.author),
                 DagError::MalformedHeader(header.digest())
             );
             stake += committee.stake(&parent.origin());
