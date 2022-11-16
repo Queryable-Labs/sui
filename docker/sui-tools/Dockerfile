@@ -43,7 +43,8 @@ RUN cargo build --release \
     --bin rpc-server \
     --bin sui-faucet \
     --bin stress \
-    --bin sui-cluster-test
+    --bin sui-cluster-test \
+    --bin gui-tool
 
 # Production Image
 FROM debian:bullseye-slim AS runtime
@@ -54,6 +55,10 @@ COPY --from=builder /sui/target/release/rpc-server /usr/local/bin
 COPY --from=builder /sui/target/release/sui-faucet /usr/local/bin
 COPY --from=builder /sui/target/release/stress /usr/local/bin
 COPY --from=builder /sui/target/release/sui-cluster-test /usr/local/bin
+COPY --from=builder /sui/target/release/gui-tool /usr/local/bin
+COPY --from=builder /sui/crates/sui-tool/src/bin/templates /usr/local/bin/templates
+RUN ls /usr/local/bin
+RUN ls /usr/local/bin/templates
 
 ARG BUILD_DATE
 ARG GIT_REVISION
