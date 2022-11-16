@@ -24,7 +24,7 @@ use sui_network::{
     tonic,
 };
 
-use sui_types::{error::*, messages::*};
+use sui_types::{error::*, fp_ensure, messages::*};
 use tap::TapFallible;
 use tokio::time::sleep;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
@@ -371,16 +371,17 @@ impl ValidatorService {
             return Ok(tonic::Response::new(response.into()));
         }
 
-        // 2) Verify cert signatures
+        // 2) If the validator is already halted due to reconfiguration, we stop here, to avoid
+        // sending the transaction to consensus.
+        fp_ensure!(
+            state.should_accept_user_certs().await,
+            tonic::Status::from(SuiError::ValidatorHaltedAtEpochEnd)
+        );
+
+        // 3) Verify cert signatures
         let cert_verif_metrics_guard = start_timer(metrics.cert_verification_latency.clone());
         let certificate = certificate.verify(&state.committee.load())?;
         drop(cert_verif_metrics_guard);
-
-        // 3) If the validator is already halted, we stop here, to avoid
-        // sending the transaction to consensus.
-        if state.is_halted() && !certificate.data().data.kind.is_system_tx() {
-            return Err(tonic::Status::from(SuiError::ValidatorHaltedAtEpochEnd));
-        }
 
         // 4) All certificates are sent to consensus (at least by some authorities)
         // For shared objects this will wait until either timeout or we have heard back from consensus.
