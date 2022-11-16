@@ -1,5 +1,11 @@
 # @mysten/sui.js
 
+## 0.17.0
+
+### Minor Changes
+
+- a9602e533: Remove deprecated events API
+
 ## 0.16.0
 
 ### Minor Changes
