@@ -11,6 +11,7 @@ jobs:
       - name: Update local toolchain
         run: |
           rustup update
+          rustup component add rustfmt
           rustup component add clippy
           rustup install nightly
 
