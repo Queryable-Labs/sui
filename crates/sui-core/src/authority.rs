@@ -1177,15 +1177,15 @@ impl AuthorityState {
                 let timestamp_ms = Self::unixtime_now_ms();
                 let last_tx_version = queryable_exporter.last_tx_version();
 
-                if last_tx_version < last_known_tx_seq.clone() {
+                if last_tx_version < last_known_tx_seq {
                     let since_seq = if last_tx_version == 0 {
                         0
                     } else {
-                        last_tx_version.clone() + 1
+                        last_tx_version + 1
                     };
 
                     let fetched_digests_result =
-                        database.transactions_in_seq_range(since_seq, last_known_tx_seq.clone());
+                        database.transactions_in_seq_range(since_seq, last_known_tx_seq);
 
                     let fetched_digests = match fetched_digests_result {
                         Ok(fetched_digests) => fetched_digests,
@@ -1237,7 +1237,7 @@ impl AuthorityState {
                         let call_traces_result = database.get_call_traces(&digest);
 
                         let call_traces = match call_traces_result {
-                            Ok(call_traces) => call_traces.unwrap_or(vec![]),
+                            Ok(call_traces) => call_traces.unwrap_or_default(),
                             Err(err) => {
                                 warn!(
                                     "Failed to retrieve call traces for digest {:?}, reason: {}",
@@ -1260,8 +1260,8 @@ impl AuthorityState {
                                     contents,
                                 } => {
                                     let move_struct_result = Event::move_event_to_move_struct(
-                                        &type_,
-                                        &contents,
+                                        type_,
+                                        contents,
                                         module_cache.as_ref(),
                                     );
 
@@ -1290,15 +1290,12 @@ impl AuthorityState {
                             &effects,
                             event_move_structs,
                             call_traces,
-                            timestamp_ms.clone(),
+                            timestamp_ms,
                         );
 
-                        match add_transaction_result {
-                            Err(err) => {
-                                warn!("Failed to add transaction, reason: {}", err);
-                                return;
-                            }
-                            _ => {}
+                        if let Err(err) = add_transaction_result {
+                            warn!("Failed to add transaction, reason: {}", err);
+                            return;
                         }
 
                         if queryable_exporter.get_cached_transactions_count()
@@ -1361,16 +1358,13 @@ impl AuthorityState {
                                         queryable_exporter.last_successful_export_tx_version(),
                                     );
 
-                                    match database
+                                    if let Err(err) = database
                                         .prune_call_traces(&prune_call_traces_transaction_digests)
                                     {
-                                        Err(err) => {
-                                            warn!("Failed to prune call traces, reason: {}", err);
+                                        warn!("Failed to prune call traces, reason: {}", err);
 
-                                            return;
-                                        }
-                                        _ => {}
-                                    };
+                                        return;
+                                    }
                                 }
                             }
                         }
@@ -1402,7 +1396,7 @@ impl AuthorityState {
             queryable_exporter,
             database,
             module_cache,
-            seq.clone()
+            seq,
         ));
 
         // Load cert and effects.

@@ -1,12 +1,10 @@
 name: CI
 
-runs-on: self-hosted
-
 on: push
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
 
@@ -26,7 +24,7 @@ jobs:
       - name: Lint
         run: |
           cargo fmt -- --check
-          cargo clippy -- -D warnings
+          cargo clippy -- -D warnings -A clippy::await_holding_lock
 
       - name: Test
         run: |
