@@ -21,7 +21,7 @@ use sui_types::event::{BalanceChangeType, Event};
 use sui_types::messages::{SignedTransactionEffects, TransactionKind, VerifiedCertificate};
 use sui_types::object::Owner;
 use sui_types::{batch::TxSequenceNumber, intent::ChainId};
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 #[derive(Debug)]
 pub struct QueryableExporter {
@@ -595,8 +595,7 @@ impl QueryableExporter {
         transaction_writer.add_value_u64(String::from(ENTITY_FIELD_ID), Some(transaction_id))?;
         transaction_writer.add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
 
-        transaction_writer
-            .add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
+        transaction_writer.add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
         transaction_writer
             .add_value_u64(String::from(ENTITY_FIELD_TIME_INDEX), Some(time_index))?;
 
@@ -804,7 +803,11 @@ impl QueryableExporter {
         ////////////////
         ////////////////
 
-        for (j, move_struct) in event_move_structs.iter().enumerate().take(effects.effects.events.len()) {
+        for (j, move_struct) in event_move_structs
+            .iter()
+            .enumerate()
+            .take(effects.effects.events.len())
+        {
             let tx_event_id = j as u32;
             let event = &effects.effects.events[j];
 
@@ -818,19 +821,13 @@ impl QueryableExporter {
 
             event_writer.add_value_u64(String::from(ENTITY_FIELD_ID), Some(event_id))?;
 
-            event_writer.add_value_u64(
-                String::from("relation_transaction"),
-                Some(transaction_id),
-            )?;
+            event_writer
+                .add_value_u64(String::from("relation_transaction"), Some(transaction_id))?;
 
             event_writer.add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
 
-            event_writer
-                .add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
-            event_writer.add_value_u64(
-                String::from(ENTITY_FIELD_TIME_INDEX),
-                Some(time_index),
-            )?;
+            event_writer.add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
+            event_writer.add_value_u64(String::from(ENTITY_FIELD_TIME_INDEX), Some(time_index))?;
 
             event_writer.add_value_u32(String::from("tx_event_id"), Some(tx_event_id))?;
 
@@ -932,9 +929,11 @@ impl QueryableExporter {
                                 }
                                 MoveValue::Bool(value) => {
                                     event_payload_types.push(Some(Vec::from("bool")));
-                                    event_payload_values.push(Some(Vec::from(
-                                        if *value { [1] } else { [0] },
-                                    )));
+                                    event_payload_values.push(Some(Vec::from(if *value {
+                                        [1]
+                                    } else {
+                                        [0]
+                                    })));
                                 }
                                 MoveValue::Address(value) => {
                                     event_payload_types.push(Some(Vec::from("address")));
@@ -1229,19 +1228,14 @@ impl QueryableExporter {
 
             call_trace_writer.add_value_u64(String::from(ENTITY_FIELD_ID), Some(call_trace_id))?;
 
-            call_trace_writer.add_value_u64(
-                String::from("relation_transaction"),
-                Some(transaction_id),
-            )?;
+            call_trace_writer
+                .add_value_u64(String::from("relation_transaction"), Some(transaction_id))?;
 
             call_trace_writer.add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
 
+            call_trace_writer.add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
             call_trace_writer
-                .add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
-            call_trace_writer.add_value_u64(
-                String::from(ENTITY_FIELD_TIME_INDEX),
-                Some(time_index),
-            )?;
+                .add_value_u64(String::from(ENTITY_FIELD_TIME_INDEX), Some(time_index))?;
 
             call_trace_writer
                 .add_value_binary(String::from(ENTITY_FIELD_TX_HASH), Some(tx_hash.clone()))?;

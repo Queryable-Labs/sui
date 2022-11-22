@@ -1184,10 +1184,8 @@ impl AuthorityState {
                         last_tx_version.clone() + 1
                     };
 
-                    let fetched_digests_result = database.transactions_in_seq_range(
-                        since_seq,
-                        last_known_tx_seq.clone(),
-                    );
+                    let fetched_digests_result =
+                        database.transactions_in_seq_range(since_seq, last_known_tx_seq.clone());
 
                     let fetched_digests = match fetched_digests_result {
                         Ok(fetched_digests) => fetched_digests,
@@ -1239,14 +1237,11 @@ impl AuthorityState {
                         let call_traces_result = database.get_call_traces(&digest);
 
                         let call_traces = match call_traces_result {
-                            Ok(call_traces) => {
-                                call_traces.unwrap_or(vec![])
-                            }
+                            Ok(call_traces) => call_traces.unwrap_or(vec![]),
                             Err(err) => {
                                 warn!(
                                     "Failed to retrieve call traces for digest {:?}, reason: {}",
-                                    digest,
-                                    err
+                                    digest, err
                                 );
 
                                 return;
@@ -1288,16 +1283,15 @@ impl AuthorityState {
                             })
                         }
 
-                        let add_transaction_result = queryable_exporter
-                            .add_transaction(
-                                &seq,
-                                &digest,
-                                &cert,
-                                &effects,
-                                event_move_structs,
-                                call_traces,
-                                timestamp_ms.clone(),
-                            );
+                        let add_transaction_result = queryable_exporter.add_transaction(
+                            &seq,
+                            &digest,
+                            &cert,
+                            &effects,
+                            event_move_structs,
+                            call_traces,
+                            timestamp_ms.clone(),
+                        );
 
                         match add_transaction_result {
                             Err(err) => {
@@ -1332,10 +1326,11 @@ impl AuthorityState {
                                     return;
                                 }
                                 _ => {
-                                    let fetched_digests_result = database.transactions_in_seq_range(
-                                        last_successful_export_tx_version,
-                                        queryable_exporter.last_successful_export_tx_version(),
-                                    );
+                                    let fetched_digests_result = database
+                                        .transactions_in_seq_range(
+                                            last_successful_export_tx_version,
+                                            queryable_exporter.last_successful_export_tx_version(),
+                                        );
 
                                     let fetched_digests = match fetched_digests_result {
                                         Ok(fetched_digests) => fetched_digests,
@@ -1366,14 +1361,14 @@ impl AuthorityState {
                                         queryable_exporter.last_successful_export_tx_version(),
                                     );
 
-                                    match database.prune_call_traces(
-                                        &prune_call_traces_transaction_digests,
-                                    ) {
+                                    match database
+                                        .prune_call_traces(&prune_call_traces_transaction_digests)
+                                    {
                                         Err(err) => {
                                             warn!("Failed to prune call traces, reason: {}", err);
 
                                             return;
-                                        },
+                                        }
                                         _ => {}
                                     };
                                 }
