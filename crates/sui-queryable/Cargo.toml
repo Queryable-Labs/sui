@@ -1,0 +1,17 @@
+[package]
+name = "sui-queryable"
+version = "0.1.0"
+authors = ["Queryable Labs <opensource@queryable.com>"]
+license = "Apache-2.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.57"
+serde = { version = "1.0.137", default-features = false }
+serde_json = "1.0.81"
+tracing = "0.1.36"
+parking_lot = { version = "0.12.1", features = [ "send_guard" ] }
+move-core-types.workspace = true
+sui-types = { path = "../sui-types" }
+queryable-core = { git = "https://github.com/Queryable-Labs/queryable-core.git", rev = "c232d3a2749feb260e6c0d07592601b9a8e9532f" }

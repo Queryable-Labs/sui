@@ -517,6 +517,7 @@ fn process_package(
             written, deleted, ..
         },
         _events,
+        _call_traces,
     ) = temporary_store.into_inner();
 
     store.finish(written, deleted);
@@ -586,6 +587,7 @@ pub fn generate_genesis_system_object(
             written, deleted, ..
         },
         _events,
+        _call_traces,
     ) = temporary_store.into_inner();
 
     store.finish(written, deleted);

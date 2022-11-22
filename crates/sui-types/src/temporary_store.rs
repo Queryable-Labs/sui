@@ -8,6 +8,7 @@ use std::ops::Neg;
 use move_core_types::account_address::AccountAddress;
 use move_core_types::language_storage::{ModuleId, StructTag};
 use move_core_types::resolver::{ModuleResolver, ResourceResolver};
+use move_core_types::trace::CallTrace;
 use tracing::trace;
 
 use crate::coin::Coin;
@@ -92,6 +93,7 @@ pub struct TemporaryStore<S> {
     deleted: BTreeMap<ObjectID, (SingleTxContext, SequenceNumber, DeleteKind)>,
     /// Ordered sequence of events emitted by execution
     events: Vec<Event>,
+    call_traces: Vec<CallTrace>,
     gas_charged: Option<(SuiAddress, ObjectID, GasCostSummary)>,
 }
 
@@ -109,6 +111,7 @@ impl<S> TemporaryStore<S> {
             written: BTreeMap::new(),
             deleted: BTreeMap::new(),
             events: Vec::new(),
+            call_traces: Vec::new(),
             gas_charged: None,
         }
     }
@@ -119,7 +122,7 @@ impl<S> TemporaryStore<S> {
     }
 
     /// Break up the structure and return its internal stores (objects, active_inputs, written, deleted)
-    pub fn into_inner(self) -> (InnerTemporaryStore, Vec<Event>) {
+    pub fn into_inner(self) -> (InnerTemporaryStore, Vec<Event>, Vec<CallTrace>) {
         #[cfg(debug_assertions)]
         {
             self.check_invariants();
@@ -201,7 +204,7 @@ impl<S> TemporaryStore<S> {
             written,
             deleted,
         };
-        (store, events)
+        (store, events, self.call_traces)
     }
 
     fn create_written_events(
@@ -458,7 +461,7 @@ impl<S> TemporaryStore<S> {
         gas_cost_summary: GasCostSummary,
         status: ExecutionStatus,
         gas_object_ref: ObjectRef,
-    ) -> (InnerTemporaryStore, TransactionEffects) {
+    ) -> (InnerTemporaryStore, TransactionEffects, Vec<CallTrace>) {
         let written: BTreeMap<ObjectID, (ObjectRef, Owner, WriteKind)> = self
             .written
             .iter()
@@ -499,7 +502,7 @@ impl<S> TemporaryStore<S> {
                 }
             }
         }
-        let (inner, events) = self.into_inner();
+        let (inner, events, call_traces) = self.into_inner();
 
         let effects = TransactionEffects {
             status,
@@ -515,7 +518,7 @@ impl<S> TemporaryStore<S> {
             events,
             dependencies: transaction_dependencies,
         };
-        (inner, effects)
+        (inner, effects, call_traces)
     }
 
     /// An internal check of the invariants (will only fire in debug)
@@ -661,10 +664,15 @@ impl<S> TemporaryStore<S> {
         self.written.clear();
         self.deleted.clear();
         self.events.clear();
+        self.call_traces.clear();
     }
 
     pub fn log_event(&mut self, event: Event) {
         self.events.push(event)
+    }
+
+    pub fn add_call_traces(&mut self, call_traces: Vec<CallTrace>) {
+        self.call_traces.extend(call_traces);
     }
 
     pub fn read_object(&self, id: &ObjectID) -> Option<&Object> {
@@ -710,6 +718,10 @@ impl<S: ChildObjectResolver> Storage for TemporaryStore<S> {
 
     fn log_event(&mut self, event: Event) {
         TemporaryStore::log_event(self, event)
+    }
+
+    fn add_call_traces(&mut self, call_traces: Vec<CallTrace>) {
+        TemporaryStore::add_call_traces(self, call_traces);
     }
 
     fn read_object(&self, id: &ObjectID) -> Option<&Object> {

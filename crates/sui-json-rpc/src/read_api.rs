@@ -148,7 +148,11 @@ impl RpcFullNodeReadApiServer for FullNodeApi {
         let tx_data =
             TransactionData::from_signable_bytes(&tx_bytes.to_vec().map_err(|e| anyhow!(e))?)?;
         let txn_digest = TransactionDigest::new(sha3_hash(&tx_data));
-        Ok(self.state.dry_exec_transaction(tx_data, txn_digest).await?)
+        Ok(self
+            .state
+            .dry_exec_transaction(tx_data, txn_digest)
+            .await?
+            .0)
     }
 
     async fn get_normalized_move_modules_by_package(

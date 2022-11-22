@@ -107,6 +107,7 @@ pub(crate) async fn init_state(
         None,
         None,
         None,
+        None,
         checkpoint_store,
         &sui_config::genesis::Genesis::get_default_genesis(),
         &prometheus::Registry::new(),

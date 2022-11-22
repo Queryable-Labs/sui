@@ -11,10 +11,12 @@ use mysten_network::server::ServerBuilder;
 use narwhal_network::metrics::MetricsMakeCallbackHandler;
 use narwhal_network::metrics::{NetworkConnectionMetrics, NetworkMetrics};
 use parking_lot::Mutex;
+use parking_lot::RwLock;
 use prometheus::Registry;
 use std::option::Option::None;
+use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
-use std::{sync::Arc, time::Duration};
 use sui_config::NodeConfig;
 use sui_core::authority_active::checkpoint_driver::CheckpointMetrics;
 use sui_core::authority_aggregator::{AuthAggMetrics, AuthorityAggregator};
@@ -68,6 +70,8 @@ pub mod metrics;
 mod handle;
 pub use handle::SuiNodeHandle;
 use sui_core::checkpoints2::{CheckpointService, LogCheckpointOutput};
+use sui_queryable::export::QueryableExporter;
+use sui_types::intent::ChainId;
 
 pub struct SuiNode {
     grpc_server: tokio::task::JoinHandle<Result<()>>,
@@ -143,6 +147,17 @@ impl SuiNode {
             None
         };
 
+        let queryable_exporter = if let Some(queryable_config_path) = &config.queryable_config_path
+        {
+            Some(RwLock::new(QueryableExporter::new(
+                queryable_config_path.clone(),
+                // @TODO: set chain
+                Some(ChainId::Testing),
+            )?))
+        } else {
+            None
+        };
+
         let (tx_reconfigure_consensus, rx_reconfigure_consensus) = channel(100);
 
         let transaction_streamer = config
@@ -167,6 +182,7 @@ impl SuiNode {
                 store,
                 node_sync_store,
                 committee_store.clone(),
+                queryable_exporter,
                 index_store.clone(),
                 event_store,
                 transaction_streamer,

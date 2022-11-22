@@ -53,6 +53,8 @@ macro_rules! exit_main {
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize, Error, Hash)]
 #[allow(clippy::large_enum_variant)]
 pub enum SuiError {
+    #[error("Failed to generate Queryable data stream: {}", error)]
+    QueryableError { error: String },
     // Object misuse issues
     #[error("Error checking transaction input objects: {:?}", errors)]
     TransactionInputObjectsErrors { errors: Vec<SuiError> },

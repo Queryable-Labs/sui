@@ -11,6 +11,7 @@ use crate::{
 };
 use move_core_types::ident_str;
 use move_core_types::identifier::{IdentStr, Identifier};
+use move_core_types::trace::CallTrace;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -96,6 +97,8 @@ pub trait Storage {
 
     /// Record an event that happened during execution
     fn log_event(&mut self, event: Event);
+
+    fn add_call_traces(&mut self, call_traces: Vec<CallTrace>);
 
     fn read_object(&self, id: &ObjectID) -> Option<&Object>;
 

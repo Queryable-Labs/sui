@@ -275,6 +275,7 @@ impl<R: rand::RngCore + rand::CryptoRng> ConfigBuilder<R> {
                     account_key_pair: Arc::new(validator.account_key_pair),
                     network_key_pair: Arc::new(validator.network_key_pair),
                     db_path,
+                    queryable_config_path: None,
                     network_address,
                     metrics_address: utils::available_local_socket_address(),
                     admin_interface_port: utils::get_available_port(),

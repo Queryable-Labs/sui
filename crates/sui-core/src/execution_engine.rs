@@ -4,6 +4,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use move_core_types::language_storage::{ModuleId, StructTag};
+use move_core_types::trace::CallTrace;
 use move_vm_runtime::{move_vm::MoveVM, native_functions::NativeFunctionTable};
 use tracing::{debug, instrument};
 
@@ -59,6 +60,7 @@ pub fn execute_transaction_to_effects<S: BackingPackageStore + ParentSync + Chil
 ) -> (
     InnerTemporaryStore,
     TransactionEffects,
+    Vec<CallTrace>,
     Option<ExecutionError>,
 ) {
     let mut tx_ctx = TxContext::new(&transaction_data.signer(), &transaction_digest, epoch);
@@ -92,7 +94,7 @@ pub fn execute_transaction_to_effects<S: BackingPackageStore + ParentSync + Chil
     // Remove from dependencies the generic hash
     transaction_dependencies.remove(&TransactionDigest::genesis());
 
-    let (inner, effects) = temporary_store.to_effects(
+    let (inner, effects, call_traces) = temporary_store.to_effects(
         shared_object_refs,
         &transaction_digest,
         transaction_dependencies.into_iter().collect(),
@@ -100,7 +102,7 @@ pub fn execute_transaction_to_effects<S: BackingPackageStore + ParentSync + Chil
         status,
         gas_object_ref,
     );
-    (inner, effects, execution_error)
+    (inner, effects, call_traces, execution_error)
 }
 
 fn charge_gas_for_object_read<S>(
@@ -743,7 +745,7 @@ fn test_pay_success_without_delete() {
     let mut ctx = TxContext::with_sender_for_testing_only(&sender);
 
     assert!(pay(&mut store, coin_objects, recipients, amounts, &mut ctx).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert!(store.deleted.is_empty());
     assert_eq!(store.created().len(), 2);
@@ -779,7 +781,7 @@ fn test_pay_success_delete_one() {
     let mut ctx = TxContext::random_for_testing_only();
 
     assert!(pay(&mut store, coin_objects, recipients, amounts, &mut ctx).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert_eq!(store.deleted.len(), 1);
     assert!(store.deleted.contains_key(&input_coin_id1));
@@ -814,7 +816,7 @@ fn test_pay_success_delete_all() {
     let mut ctx = TxContext::with_sender_for_testing_only(&sender);
 
     assert!(pay(&mut store, coin_objects, recipients, amounts, &mut ctx).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert_eq!(store.deleted.len(), 2);
     assert!(store.deleted.contains_key(&input_coin_id1));
@@ -848,7 +850,7 @@ fn test_pay_sui_success_one_input_coin() {
         temporary_store::with_input_objects_for_testing(InputObjects::from(coin_objects.clone()));
     let mut ctx = TxContext::with_sender_for_testing_only(&sender);
     assert!(pay_sui(&mut store, &mut coin_objects, recipients, amounts, &mut ctx).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert!(store.deleted.is_empty());
     assert_eq!(store.written.len(), 3);
@@ -886,7 +888,7 @@ fn test_pay_sui_success_multiple_input_coins() {
         temporary_store::with_input_objects_for_testing(InputObjects::from(coin_objects.clone()));
     let mut ctx = TxContext::with_sender_for_testing_only(&sender);
     assert!(pay_sui(&mut store, &mut coin_objects, recipients, amounts, &mut ctx).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert_eq!(store.deleted.len(), 2);
     assert!(store.deleted.contains_key(&input_coin_id2));
@@ -924,7 +926,7 @@ fn test_pay_all_sui_success_multiple_input_coins() {
     let mut store: TemporaryStore<()> =
         temporary_store::with_input_objects_for_testing(InputObjects::from(coin_objects.clone()));
     assert!(pay_all_sui(sender, &mut store, &mut coin_objects, recipient).is_ok());
-    let (store, _events) = store.into_inner();
+    let (store, _events, _call_traces) = store.into_inner();
 
     assert_eq!(store.deleted.len(), 2);
     assert!(store.deleted.contains_key(&input_coin_id2));

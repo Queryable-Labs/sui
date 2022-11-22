@@ -24,9 +24,11 @@ use move_bytecode_utils::module_cache::SyncModuleCache;
 use move_core_types::account_address::AccountAddress;
 use move_core_types::identifier::Identifier;
 use move_core_types::parser::parse_struct_tag;
+use move_core_types::trace::CallTrace;
+use move_core_types::value::MoveStruct;
 use move_core_types::{language_storage::ModuleId, resolver::ModuleResolver};
 use move_vm_runtime::{move_vm::MoveVM, native_functions::NativeFunctionTable};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use prometheus::{
     exponential_buckets, register_histogram_with_registry, register_int_counter_with_registry,
     register_int_gauge_with_registry, Histogram, IntCounter, IntGauge,
@@ -38,7 +40,7 @@ use tokio::sync::{
     mpsc,
 };
 use tracing::Instrument;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use typed_store::Map;
 
 pub use authority_notify_read::EffectsNotifyRead;
@@ -55,6 +57,8 @@ use sui_config::genesis::Genesis;
 use sui_json_rpc_types::{
     type_and_fields_from_move_struct, SuiEvent, SuiEventEnvelope, SuiTransactionEffects,
 };
+use sui_metrics::spawn_monitored_task;
+use sui_queryable::export::QueryableExporter;
 use sui_simulator::nondeterministic;
 use sui_storage::{
     event_store::{EventStore, EventStoreType, StoredEvent},
@@ -530,6 +534,7 @@ pub struct AuthorityState {
 
     pub node_sync_store: Arc<NodeSyncStore>,
 
+    queryable_exporter: Arc<Option<RwLock<QueryableExporter>>>,
     indexes: Option<Arc<IndexStore>>,
 
     pub module_cache: Arc<SyncModuleCache<ResolverWrapper<AuthorityStore>>>, // TODO: use strategies (e.g. LRU?) to constraint memory usage
@@ -880,7 +885,7 @@ impl AuthorityState {
         // non-transient (transaction input is invalid, move vm errors). However, all errors from
         // this function occur before we have written anything to the db, so we commit the tx
         // guard and rely on the client to retry the tx (if it was transient).
-        let (inner_temporary_store, signed_effects) =
+        let (inner_temporary_store, signed_effects, call_traces) =
             match self.prepare_certificate(certificate).await {
                 Err(e) => {
                     debug!(name = ?self.name, ?digest, "Error preparing transaction: {e}");
@@ -907,6 +912,7 @@ impl AuthorityState {
                 inner_temporary_store,
                 certificate,
                 &signed_effects,
+                &call_traces,
                 notifier_ticket,
             )
             .await;
@@ -1032,7 +1038,11 @@ impl AuthorityState {
     async fn prepare_certificate(
         &self,
         certificate: &VerifiedCertificate,
-    ) -> SuiResult<(InnerTemporaryStore, SignedTransactionEffects)> {
+    ) -> SuiResult<(
+        InnerTemporaryStore,
+        SignedTransactionEffects,
+        Vec<CallTrace>,
+    )> {
         let _metrics_guard = start_timer(self.metrics.prepare_certificate_latency.clone());
         let (gas_status, input_objects) =
             transaction_input_checker::check_certificate_input(&self.database, certificate).await?;
@@ -1059,7 +1069,7 @@ impl AuthorityState {
         let transaction_dependencies = input_objects.transaction_dependencies();
         let temporary_store =
             TemporaryStore::new(self.database.clone(), input_objects, *certificate.digest());
-        let (inner_temp_store, effects, _execution_error) =
+        let (inner_temp_store, effects, call_traces, _execution_error) =
             execution_engine::execute_transaction_to_effects(
                 shared_object_refs,
                 temporary_store,
@@ -1074,14 +1084,14 @@ impl AuthorityState {
 
         // TODO: Distribute gas charge and rebate, which can be retrieved from effects.
         let signed_effects = effects.to_sign_effects(self.epoch(), &self.name, &*self.secret);
-        Ok((inner_temp_store, signed_effects))
+        Ok((inner_temp_store, signed_effects, call_traces))
     }
 
     pub async fn dry_exec_transaction(
         &self,
         transaction: TransactionData,
         transaction_digest: TransactionDigest,
-    ) -> Result<SuiTransactionEffects, anyhow::Error> {
+    ) -> Result<(SuiTransactionEffects, Vec<CallTrace>), anyhow::Error> {
         let (gas_status, input_objects) =
             transaction_input_checker::check_transaction_input(&self.database, &transaction)
                 .await?;
@@ -1090,7 +1100,7 @@ impl AuthorityState {
         let transaction_dependencies = input_objects.transaction_dependencies();
         let temporary_store =
             TemporaryStore::new(self.database.clone(), input_objects, transaction_digest);
-        let (_inner_temp_store, effects, _execution_error) =
+        let (_inner_temp_store, effects, call_traces, _execution_error) =
             execution_engine::execute_transaction_to_effects(
                 shared_object_refs,
                 temporary_store,
@@ -1102,7 +1112,10 @@ impl AuthorityState {
                 gas_status,
                 self.epoch(),
             );
-        SuiTransactionEffects::try_from(effects, self.module_cache.as_ref())
+        Ok((
+            SuiTransactionEffects::try_from(effects, self.module_cache.as_ref())?,
+            call_traces,
+        ))
     }
 
     pub fn is_tx_already_executed(&self, digest: &TransactionDigest) -> SuiResult<bool> {
@@ -1153,6 +1166,225 @@ impl AuthorityState {
         )
     }
 
+    pub(crate) async fn queryable_process(
+        queryable_exporter: Arc<Option<RwLock<QueryableExporter>>>,
+        database: Arc<AuthorityStore>,
+        module_cache: Arc<SyncModuleCache<ResolverWrapper<AuthorityStore>>>,
+        last_known_tx_seq: TxSequenceNumber,
+    ) {
+        if let Some(queryable_exporter) = queryable_exporter.as_ref() {
+            if let Some(mut queryable_exporter) = queryable_exporter.try_write() {
+                let timestamp_ms = Self::unixtime_now_ms();
+                let last_tx_version = queryable_exporter.last_tx_version();
+
+                if last_tx_version < last_known_tx_seq.clone() {
+                    let since_seq = if last_tx_version == 0 {
+                        0
+                    } else {
+                        last_tx_version.clone() + 1
+                    };
+
+                    let fetched_digests_result = database.transactions_in_seq_range(
+                        since_seq,
+                        last_known_tx_seq.clone(),
+                    );
+
+                    let fetched_digests = match fetched_digests_result {
+                        Ok(fetched_digests) => fetched_digests,
+                        Err(err) => {
+                            warn!(
+                                "Failed to retrieve transactions in range [{}:{}], reason: {}",
+                                since_seq,
+                                last_known_tx_seq.clone(),
+                                err
+                            );
+
+                            return;
+                        }
+                    };
+
+                    for item in fetched_digests {
+                        let seq = item.0;
+                        let digest = item.1.transaction;
+
+                        // @TODO: utilise multi get!!!
+                        let info_result = database.get_signed_transaction_info(&digest);
+
+                        let info = match info_result {
+                            Ok(info) => info,
+                            Err(err) => {
+                                warn!(
+                                    "Failed to retrieve singed transaction info by {:?}, reason: {}",
+                                    digest,
+                                    err
+                                );
+
+                                return;
+                            }
+                        };
+
+                        let (cert, effects) = match info {
+                            VerifiedTransactionInfoResponse {
+                                certified_transaction: Some(cert),
+                                signed_effects: Some(effects),
+                                ..
+                            } => (cert, effects),
+                            _ => {
+                                warn!("Certificate is not found for digest {:?}", digest);
+
+                                return;
+                            }
+                        };
+
+                        let call_traces_result = database.get_call_traces(&digest);
+
+                        let call_traces = match call_traces_result {
+                            Ok(call_traces) => {
+                                call_traces.unwrap_or(vec![])
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Failed to retrieve call traces for digest {:?}, reason: {}",
+                                    digest,
+                                    err
+                                );
+
+                                return;
+                            }
+                        };
+
+                        let mut event_move_structs: Vec<Option<MoveStruct>> = vec![];
+
+                        for event in &effects.effects.events {
+                            event_move_structs.push(match event {
+                                Event::MoveEvent {
+                                    package_id: _,
+                                    transaction_module: _,
+                                    sender: _,
+                                    type_,
+                                    contents,
+                                } => {
+                                    let move_struct_result = Event::move_event_to_move_struct(
+                                        &type_,
+                                        &contents,
+                                        module_cache.as_ref(),
+                                    );
+
+                                    let move_struct = match move_struct_result {
+                                        Ok(move_struct) => move_struct,
+                                        Err(err) => {
+                                            warn!(
+                                                "Failed to convert move event to move struct, reason: {}",
+                                                err
+                                            );
+
+                                            return;
+                                        }
+                                    };
+
+                                    Some(move_struct)
+                                }
+                                _ => None,
+                            })
+                        }
+
+                        let add_transaction_result = queryable_exporter
+                            .add_transaction(
+                                &seq,
+                                &digest,
+                                &cert,
+                                &effects,
+                                event_move_structs,
+                                call_traces,
+                                timestamp_ms.clone(),
+                            );
+
+                        match add_transaction_result {
+                            Err(err) => {
+                                warn!("Failed to add transaction, reason: {}", err);
+                                return;
+                            }
+                            _ => {}
+                        }
+
+                        if queryable_exporter.get_cached_transactions_count()
+                            > queryable_exporter.get_transactions_per_export()
+                        {
+                            let last_successful_export_tx_version =
+                                queryable_exporter.last_successful_export_tx_version();
+
+                            let result = queryable_exporter.export().await.map_err(|err| {
+                                SuiError::QueryableError {
+                                    error: err.to_string(),
+                                }
+                            });
+
+                            match result {
+                                Err(err) => {
+                                    error!("Failed to export, error: {:?}", err);
+
+                                    let result = queryable_exporter.reset_cached_data();
+
+                                    if result.is_err() {
+                                        panic!("Failed to recover from add_transaction error")
+                                    }
+
+                                    return;
+                                }
+                                _ => {
+                                    let fetched_digests_result = database.transactions_in_seq_range(
+                                        last_successful_export_tx_version,
+                                        queryable_exporter.last_successful_export_tx_version(),
+                                    );
+
+                                    let fetched_digests = match fetched_digests_result {
+                                        Ok(fetched_digests) => fetched_digests,
+                                        Err(err) => {
+                                            warn!(
+                                                "Failed to fetch digests for range [{}:{}], reason: {}",
+                                                last_successful_export_tx_version,
+                                                queryable_exporter.last_successful_export_tx_version(),
+                                                err
+                                            );
+
+                                            return;
+                                        }
+                                    };
+
+                                    let mut prune_call_traces_transaction_digests: Vec<
+                                        TransactionDigest,
+                                    > = vec![];
+
+                                    for item in fetched_digests {
+                                        prune_call_traces_transaction_digests
+                                            .push(item.1.transaction);
+                                    }
+
+                                    info!(
+                                        "Pruning call traces from tx {} till tx {}",
+                                        last_successful_export_tx_version,
+                                        queryable_exporter.last_successful_export_tx_version(),
+                                    );
+
+                                    match database.prune_call_traces(
+                                        &prune_call_traces_transaction_digests,
+                                    ) {
+                                        Err(err) => {
+                                            warn!("Failed to prune call traces, reason: {}", err);
+
+                                            return;
+                                        },
+                                        _ => {}
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[instrument(level = "debug", skip_all, fields(seq=?seq, tx_digest=?digest), err)]
     async fn post_process_one_tx(
         &self,
@@ -1162,9 +1394,21 @@ impl AuthorityState {
         if self.indexes.is_none()
             && self.transaction_streamer.is_none()
             && self.event_handler.is_none()
+            && self.queryable_exporter.is_none()
         {
             return Ok(());
         }
+
+        let queryable_exporter = Arc::clone(&self.queryable_exporter);
+        let database = Arc::clone(&self.database);
+        let module_cache = Arc::clone(&self.module_cache);
+
+        spawn_monitored_task!(AuthorityState::queryable_process(
+            queryable_exporter,
+            database,
+            module_cache,
+            seq.clone()
+        ));
 
         // Load cert and effects.
         let info = self.make_transaction_info(digest).await?;
@@ -1182,6 +1426,13 @@ impl AuthorityState {
         };
 
         let timestamp_ms = Self::unixtime_now_ms();
+
+        if self.indexes.is_none()
+            && self.transaction_streamer.is_none()
+            && self.event_handler.is_none()
+        {
+            return Ok(());
+        }
 
         // Index tx
         if let Some(indexes) = &self.indexes {
@@ -1493,6 +1744,7 @@ impl AuthorityState {
         store: Arc<AuthorityStore>,
         node_sync_store: Arc<NodeSyncStore>,
         committee_store: Arc<CommitteeStore>,
+        queryable_exporter: Option<RwLock<QueryableExporter>>,
         indexes: Option<Arc<IndexStore>>,
         event_store: Option<Arc<EventStoreType>>,
         transaction_streamer: Option<Arc<TransactionStreamer>>,
@@ -1537,6 +1789,7 @@ impl AuthorityState {
             move_vm,
             database: store.clone(),
             node_sync_store,
+            queryable_exporter: Arc::new(queryable_exporter),
             indexes,
             // `module_cache` uses a separate in-mem cache from `event_handler`
             // this is because they largely deal with different types of MoveStructs
@@ -1674,6 +1927,7 @@ impl AuthorityState {
             store,
             node_sync_store,
             epochs,
+            None,
             None,
             None,
             None,
@@ -2154,6 +2408,7 @@ impl AuthorityState {
         inner_temporary_store: InnerTemporaryStore,
         certificate: &VerifiedCertificate,
         signed_effects: &SignedTransactionEffects,
+        call_traces: &Vec<CallTrace>,
         notifier_ticket: TransactionNotifierTicket,
     ) -> SuiResult<TxSequenceNumber> {
         let _metrics_guard = start_timer(self.metrics.commit_certificate_latency.clone());
@@ -2169,6 +2424,7 @@ impl AuthorityState {
                 certificate,
                 seq,
                 signed_effects,
+                call_traces,
                 effects_digest,
             )
             .await

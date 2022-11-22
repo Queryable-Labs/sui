@@ -309,6 +309,7 @@ impl<'a> MoveTestAdapter<'a> for SuiTestAdapter<'a> {
         let empty = SerializedReturnValues {
             mutable_reference_outputs: vec![],
             return_values: vec![],
+            call_traces: vec![],
         };
         Ok((output, empty))
     }
@@ -492,6 +493,7 @@ impl<'a> SuiTestAdapter<'a> {
                 gas_object: _,
                 ..
             },
+            _call_traces,
             execution_error,
         ) = execution_engine::execute_transaction_to_effects(
             shared_object_refs,
@@ -601,6 +603,9 @@ impl<'a> SuiTestAdapter<'a> {
                 write!(out, "events: {}", self.list_events(events)).unwrap();
             }
         }
+
+        // @TODO: add call traces
+
         if !created.is_empty() {
             if !out.is_empty() {
                 out.push('\n')
