@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '*'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Remove unused toolchains
+        run: |
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+      - name: Update local toolchain
+        run: |
+          rustup update
+          rustup component add rustfmt
+          rustup component add clippy
+          rustup install nightly
+
+      - name: Toolchain info
+        run: |
+          cargo --version --verbose
+          rustc --version
+          cargo clippy --version
+
+      - name: Set up cargo cache
+        uses: actions/cache@v3
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Lint
+        run: |
+          cargo fmt -- --check
+          cargo clippy -- -D warnings -A clippy::await_holding_lock
+
+      - name: Test
+        run: |
+          cargo check
+          cargo test --all
+
+      - name: Build
+        run: |
+          cargo build --release
