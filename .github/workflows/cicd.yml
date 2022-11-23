@@ -1,4 +1,4 @@
-name: CI
+name: CICD
 
 on: push
 
@@ -7,7 +7,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
+      - name: Remove unused toolchains
+        run: |
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
       - name: Update local toolchain
         run: |
           rustup update
@@ -47,3 +50,11 @@ jobs:
       - name: Build
         run: |
           cargo build --release
+
+  cd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build Docker image
+        run: |
+          sh ./docker/build.sh
