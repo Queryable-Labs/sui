@@ -51,6 +51,7 @@ static ZERO_COST_SCHEDULE: Lazy<CostTable> = Lazy::new(zero_cost_schedule);
 pub struct GasStatus<'a> {
     cost_table: &'a CostTable,
     gas_left: InternalGas,
+    original_gas_amount: InternalGas,
     charge: bool,
 }
 
@@ -62,6 +63,7 @@ impl<'a> GasStatus<'a> {
     pub fn new(cost_table: &'a CostTable, gas_left: Gas) -> Self {
         Self {
             gas_left: gas_left.to_unit(),
+            original_gas_amount: gas_left.to_unit(),
             cost_table,
             charge: true,
         }
@@ -74,6 +76,7 @@ impl<'a> GasStatus<'a> {
     pub fn new_unmetered() -> Self {
         Self {
             gas_left: InternalGas::new(0),
+            original_gas_amount: InternalGas::new(0),
             cost_table: &ZERO_COST_SCHEDULE,
             charge: false,
         }
@@ -200,6 +203,10 @@ fn get_simple_instruction_opcode(instr: SimpleInstruction) -> Opcodes {
 }
 
 impl<'b> GasMeter for GasStatus<'b> {
+    fn charged_already_total(&self) -> Result<InternalGas, PartialVMError> {
+        Ok(self.original_gas_amount.checked_sub(self.gas_left).unwrap())
+    }
+
     /// Charge an instruction and fail if not enough gas units are left.
     fn charge_simple_instr(&mut self, instr: SimpleInstruction) -> PartialVMResult<()> {
         self.charge_instr(get_simple_instruction_opcode(instr))

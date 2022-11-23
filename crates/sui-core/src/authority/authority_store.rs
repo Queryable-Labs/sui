@@ -709,6 +709,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         certificate: &VerifiedCertificate,
         proposed_seq: TxSequenceNumber,
         effects: &TransactionEffectsEnvelope<S>,
+        call_traces: &Vec<CallTrace>,
         effects_digest: &TransactionEffectsDigest,
     ) -> SuiResult<TxSequenceNumber> {
         // Extract the new state from the execution
@@ -721,6 +722,15 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
             &self.perpetual_tables.certificates,
             iter::once((transaction_digest, certificate.serializable_ref())),
         )?;
+
+        let mut call_traces_write_batch = self.perpetual_tables.call_traces.batch();
+
+        call_traces_write_batch = call_traces_write_batch.insert_batch(
+            &self.perpetual_tables.call_traces,
+            iter::once((transaction_digest, call_traces)),
+        )?;
+
+        call_traces_write_batch.write()?;
 
         let seq = self
             .sequence_tx(
@@ -782,7 +792,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         for obj_ref in &effects.effects.wrapped {
             temporary_store.delete_object(&ctx, &obj_ref.0, obj_ref.1, DeleteKind::Wrap);
         }
-        let (inner_temporary_store, _events) = temporary_store.into_inner();
+        let (inner_temporary_store, _events, _call_traces) = temporary_store.into_inner();
 
         let mut write_batch = self.perpetual_tables.certificates.batch();
         // Store the certificate indexed by transaction digest
@@ -1472,6 +1482,27 @@ impl SuiDataStore<AuthoritySignInfo> {
                 .map(|c| c.into()),
             signed_effects: self.perpetual_tables.effects.get(transaction_digest)?,
         })
+    }
+
+    pub fn get_call_traces(
+        &self,
+        transaction_digest: &TransactionDigest,
+    ) -> Result<Option<Vec<CallTrace>>, SuiError> {
+        Ok(self.perpetual_tables.call_traces.get(transaction_digest)?)
+    }
+
+    pub fn prune_call_traces(
+        &self,
+        transaction_digests: &[TransactionDigest],
+    ) -> Result<(), SuiError> {
+        let mut call_traces_write_batch = self.perpetual_tables.call_traces.batch();
+
+        call_traces_write_batch = call_traces_write_batch
+            .delete_batch(&self.perpetual_tables.call_traces, transaction_digests)?;
+
+        call_traces_write_batch.write()?;
+
+        Ok(())
     }
 }
 

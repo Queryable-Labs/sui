@@ -47,6 +47,8 @@ pub struct NodeConfig {
     #[serde_as(as = "Arc<KeyPairBase64>")]
     pub network_key_pair: Arc<NetworkKeyPair>,
     pub db_path: PathBuf,
+    /// Path to Queryable config
+    pub queryable_config_path: Option<PathBuf>,
     #[serde(default = "default_grpc_address")]
     pub network_address: Multiaddr,
     #[serde(default = "default_json_rpc_address")]
@@ -152,6 +154,10 @@ impl NodeConfig {
 
     pub fn db_path(&self) -> &Path {
         &self.db_path
+    }
+
+    pub fn queryable_config_path(&self) -> &Option<PathBuf> {
+        &self.queryable_config_path
     }
 
     pub fn network_address(&self) -> &Multiaddr {

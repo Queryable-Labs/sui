@@ -18,6 +18,7 @@ use move_binary_format::{
     file_format::{AbilitySet, CompiledModule, LocalIndex, SignatureToken, StructHandleIndex},
 };
 use move_bytecode_verifier::VerifierConfig;
+use move_core_types::trace::CallTrace;
 use move_core_types::{
     account_address::AccountAddress,
     identifier::{IdentStr, Identifier},
@@ -211,6 +212,7 @@ fn execute_internal<
         SerializedReturnValues {
             mut mutable_reference_outputs,
             return_values,
+            call_traces,
         },
         (change_set, events, mut native_context_extensions),
     ) = session
@@ -300,6 +302,7 @@ fn execute_internal<
         writes,
         deletions,
         user_events,
+        call_traces,
         ctx,
     )?;
 
@@ -537,6 +540,7 @@ fn process_successful_execution<S: Storage + ParentSync>(
     writes: LinkedHashMap<ObjectID, (WriteKind, Owner, StructTag, AbilitySet, Vec<u8>)>,
     deletions: LinkedHashMap<ObjectID, DeleteKind>,
     user_events: Vec<(StructTag, Vec<u8>)>,
+    call_traces: Vec<CallTrace>,
     ctx: &TxContext,
 ) -> Result<(), ExecutionError> {
     let sender = ctx.sender();
@@ -686,6 +690,8 @@ fn process_successful_execution<S: Storage + ParentSync>(
             contents,
         ))
     }
+
+    state_view.add_call_traces(call_traces);
 
     // apply object writes and object deletions
     state_view.apply_object_changes(changes);

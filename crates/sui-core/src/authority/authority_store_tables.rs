@@ -132,6 +132,11 @@ pub struct AuthorityPerpetualTables<S> {
     #[default_options_override_fn = "effects_table_default_config"]
     pub(crate) effects: DBMap<TransactionDigest, TransactionEffectsEnvelope<S>>,
 
+    /// A map between the transaction digest of a certificate that was successfully processed and
+    /// call traces that were generated during it execution.
+    #[default_options_override_fn = "call_traces_table_default_config"]
+    pub(crate) call_traces: DBMap<TransactionDigest, Vec<CallTrace>>,
+
     // Tables used for authority batch structure
     // TODO: executed_sequence and batches both conceptually belong in AuthorityEpochTables,
     // but we currently require that effects and executed_sequence are written atomically.
@@ -270,5 +275,8 @@ fn certificates_table_default_config() -> DBOptions {
     default_db_options(None, None).1
 }
 fn effects_table_default_config() -> DBOptions {
+    default_db_options(None, None).1
+}
+fn call_traces_table_default_config() -> DBOptions {
     default_db_options(None, None).1
 }

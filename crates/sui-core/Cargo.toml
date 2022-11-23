@@ -18,7 +18,7 @@ serde_json = "1.0.83"
 serde_with = "2.0.1"
 tokio = { version = "1.20.1", features = ["full", "tracing", "test-util"] }
 tokio-stream = { version = "0.1.8", features = ["sync", "net"] }
-parking_lot = "0.12.1"
+parking_lot = { version="0.12.1", features = ["send_guard"] }
 async-trait = "0.1.57"
 tempfile = "3.3.0"
 itertools = "0.10.4"
@@ -45,6 +45,7 @@ sui-config = { path = "../sui-config" }
 sui-json = { path = "../sui-json" }
 sui-json-rpc-types = { path = "../sui-json-rpc-types" }
 sui-metrics = { path = "../sui-metrics" }
+sui-queryable = { path = "../sui-queryable" }
 
 move-binary-format.workspace = true
 move-bytecode-utils.workspace = true

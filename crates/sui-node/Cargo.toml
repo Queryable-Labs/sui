@@ -29,6 +29,7 @@ sui-json-rpc = { path = "../sui-json-rpc" }
 sui-telemetry = { path = "../sui-telemetry" }
 sui-types = { path = "../sui-types" }
 sui-metrics = { path = "../sui-metrics" }
+sui-queryable = { path = "../sui-queryable" }
 narwhal-network = { path = "../../narwhal/network" }
 typed-store.workspace = true
 mysten-network.workspace = true
