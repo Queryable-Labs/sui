@@ -63,5 +63,5 @@ jobs:
             PROFILE=release
             BUILD_DATE="$(git describe --always --dirty --exclude '*')"
             GIT_REVISION="$(date -u +'%Y-%m-%d')"
-          tags: ${{ github.event.inputs.tag }}"
+          tags: ${{ github.event.inputs.tags }}"
           labels: ${{ steps.meta.outputs.labels }}
