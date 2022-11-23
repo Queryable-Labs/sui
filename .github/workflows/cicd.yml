@@ -78,13 +78,13 @@ jobs:
           images: queryable/sui
 
       - name: Build and push Docker image
-          uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-          with:
-            context: .
-            push: true
-            build-args:
-              - PROFILE=release
-              - BUILD_DATE="$(git describe --always --dirty --exclude '*')"
-              - GIT_REVISION="$(date -u +'%Y-%m-%d')"
-            tags: ${{ steps.meta.outputs.tags }}
-            labels: ${{ steps.meta.outputs.labels }}
+        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        with:
+          context: .
+          push: true
+          build-args:
+            - PROFILE=release
+            - BUILD_DATE="$(git describe --always --dirty --exclude '*')"
+            - GIT_REVISION="$(date -u +'%Y-%m-%d')"
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
