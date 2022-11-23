@@ -45,10 +45,11 @@ jobs:
           cargo fmt -- --check
           cargo clippy -- -D warnings -A clippy::await_holding_lock
 
-      - name: Test
-        run: |
-          cargo check
-          cargo test --all
+# @TODO: allocate github runner to execute tests
+#      - name: Test
+#        run: |
+#          cargo check
+#          cargo test --all
 
       - name: Build
         run: |
