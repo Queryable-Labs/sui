@@ -1,36 +1,23 @@
-name: CICD
+name: CD
 
 on:
-  push:
-    branches:
-      - 'devnet'
-    tags:
-      - 'v*'
-    pull_request:
-      branches:
-        - '*'
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Docker image tags (comma delimited)'
+        required: true
 
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  cd:
+    runs-on: [self-hosted]
     steps:
       - uses: actions/checkout@v3
-      - name: Remove unused toolchains
-        run: |
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-      - name: Update local toolchain
-        run: |
-          rustup update
-          rustup component add rustfmt
-          rustup component add clippy
-          rustup install nightly
 
-      - name: Toolchain info
-        run: |
-          cargo --version --verbose
-          rustc --version
-          cargo clippy --version
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          override: true
+          components: rustfmt, clippy
 
       - name: Set up cargo cache
         uses: actions/cache@v3
@@ -45,25 +32,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Lint
-        run: |
-          cargo fmt -- --check
-          cargo clippy -- -D warnings -A clippy::await_holding_lock
-
-      - name: Test
-        run: |
-          cargo check
-          cargo test --all
-
       - name: Build
         run: |
           cargo build --release
-
-  cd:
-    needs: ci
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
 
       - name: Log in to Docker Hub
         uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
@@ -82,10 +53,9 @@ jobs:
         with:
           context: .
           push: true
-          build-args:
-            - PROFILE=release
-            - BUILD_DATE="$(git describe --always --dirty --exclude '*')"
-            - GIT_REVISION="$(date -u +'%Y-%m-%d')"
-          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            PROFILE=release
+            BUILD_DATE="$(git describe --always --dirty --exclude '*')"
+            GIT_REVISION="$(date -u +'%Y-%m-%d')"
+          tags: ${{ github.event.inputs.tags }}"
           labels: ${{ steps.meta.outputs.labels }}
-
