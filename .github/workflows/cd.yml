@@ -19,6 +19,12 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Toolchain info
+        run: |
+          cargo --version --verbose
+          rustc --version
+          cargo clippy --version
+
       - name: Set up cargo cache
         uses: actions/cache@v3
         continue-on-error: false
