@@ -13,11 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Remove unused toolchains
-        run: |
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-
       - name: Install latest nightly
         uses: actions-rs/toolchain@v1
         with:
