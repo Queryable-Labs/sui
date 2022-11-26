@@ -14,12 +14,13 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-      - name: Update local toolchain
-        run: |
-          rustup update
-          rustup component add rustfmt
-          rustup component add clippy
-          rustup install nightly
+
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
 
       - name: Toolchain info
         run: |
