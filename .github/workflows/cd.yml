@@ -5,6 +5,7 @@ on:
     inputs:
       tags:
         description: 'Docker image tags (comma delimited)'
+        type: string
         required: true
 
 jobs:
