@@ -29,18 +29,6 @@ jobs:
           rustc --version
           cargo clippy --version
 
-      - name: Set up cargo cache
-        uses: MasterworksIO/action-local-cache@1.0.0
-        continue-on-error: false
-        with:
-          path: |
-            .cargo/bin/
-            .cargo/registry/index/
-            .cargo/registry/cache/
-            .cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Build
         run: |
           cargo build --release
