@@ -2,7 +2,7 @@ FROM ubuntu:jammy
 
 ARG PROFILE=release
 
-RUN apt-get update && apt-get install -y libjemalloc-dev
+RUN apt-get update && apt-get install -y libjemalloc-dev ca-certificates
 
 # Both bench and release profiles copy from release dir
 COPY ./target/${PROFILE}/sui-node /usr/local/bin
