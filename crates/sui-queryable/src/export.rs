@@ -37,6 +37,8 @@ pub struct QueryableExporter {
     datasource_writer: RwLock<DatasourceWriter>,
 }
 
+// @TODO: export about blockchain overall statistic (peers, validators, mempool size)
+
 impl QueryableExporter {
     pub fn new(config_file_path: PathBuf, chain_id: Option<ChainId>) -> anyhow::Result<Self> {
         let transactions_name = String::from(ENTITY_TRANSACTIONS_NAME);

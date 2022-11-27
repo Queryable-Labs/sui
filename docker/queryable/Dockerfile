@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y libjemalloc-dev
 
 # Both bench and release profiles copy from release dir
 COPY ./target/${PROFILE}/sui-node /usr/local/bin
+COPY ./target/${PROFILE}/sui /usr/local/bin
 
 RUN useradd -ms /bin/bash queryable
 
