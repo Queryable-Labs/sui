@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim AS runtime
+FROM ubuntu:jammy
 
 ARG PROFILE=release
 
