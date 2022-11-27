@@ -30,7 +30,7 @@ jobs:
           cargo clippy --version
 
       - name: Set up cargo cache
-        uses: actions/cache@v3
+        uses: MasterworksIO/action-local-cache@1.0.0
         continue-on-error: false
         with:
           path: |
