@@ -15,4 +15,4 @@ parking_lot = { version = "0.12.1", features = [ "send_guard" ] }
 move-core-types.workspace = true
 sui-types = { path = "../sui-types" }
 env_logger = "0.10.0"
-queryable-core = { git = "https://github.com/Queryable-Labs/queryable-core.git", rev = "c232d3a2749feb260e6c0d07592601b9a8e9532f" }
+queryable-core = { git = "https://github.com/Queryable-Labs/queryable-core.git", rev = "16df54e4dd523ab566afa7508bd5165772c42f48" }
