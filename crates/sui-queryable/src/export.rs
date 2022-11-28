@@ -41,6 +41,8 @@ pub struct QueryableExporter {
 
 impl QueryableExporter {
     pub fn new(config_file_path: PathBuf, chain_id: Option<ChainId>) -> anyhow::Result<Self> {
+        info!("Initializing Queryable Exporter");
+
         let transactions_name = String::from(ENTITY_TRANSACTIONS_NAME);
         let events_name = String::from(ENTITY_EVENTS_NAME);
         let call_traces_name = String::from(ENTITY_CALL_TRACES_NAME);
