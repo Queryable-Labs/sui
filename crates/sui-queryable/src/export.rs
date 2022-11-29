@@ -35,6 +35,8 @@ pub struct QueryableExporter {
 
     datasource_exporter: RwLock<DatasourceExporter>,
     datasource_writer: RwLock<DatasourceWriter>,
+
+    arg_values_len: u64,
 }
 
 // @TODO: export about blockchain overall statistic (peers, validators, mempool size)
@@ -464,7 +466,7 @@ impl QueryableExporter {
                     EntityField::create_list_field(
                         String::from("arg_values"),
                         false,
-                        EntityFieldType::Binary(false),
+                        EntityFieldType::LargeBinary(false),
                     )?,
                     EntityField::create_field(
                         String::from("gas_used"),
@@ -550,6 +552,8 @@ impl QueryableExporter {
 
             datasource_exporter: RwLock::new(datasource_exporter),
             datasource_writer: RwLock::new(datasource_writer),
+
+            arg_values_len: 0
         })
     }
 
@@ -1294,6 +1298,13 @@ impl QueryableExporter {
                         .collect(),
                 ),
             )?;
+
+            for arg_value in &call_trace.args_values {
+                self.arg_values_len += arg_value.len() as u64;
+            }
+
+            trace!("Arg values length {}", self.arg_values_len);
+
             call_trace_writer.add_list_value_binary(
                 String::from("arg_values"),
                 Some(
@@ -1405,6 +1416,8 @@ impl QueryableExporter {
         self.last_successful_export_tx_version = self.last_tx_version;
 
         info!("Exported Queryable data stream");
+
+        self.arg_values_len = 0;
 
         Ok(())
     }
