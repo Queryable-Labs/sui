@@ -7273,7 +7273,7 @@ dependencies = [
 [[package]]
 name = "queryable-core"
 version = "0.1.0"
-source = "git+https://github.com/Queryable-Labs/queryable-core.git?rev=16df54e4dd523ab566afa7508bd5165772c42f48#16df54e4dd523ab566afa7508bd5165772c42f48"
+source = "git+https://github.com/Queryable-Labs/queryable-core.git?rev=64c7dc5e4d8c8b1609dfba3154ee46505aa6c785#64c7dc5e4d8c8b1609dfba3154ee46505aa6c785"
 dependencies = [
  "anyhow",
  "async-trait",

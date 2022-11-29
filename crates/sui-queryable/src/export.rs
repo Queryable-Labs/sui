@@ -21,7 +21,7 @@ use sui_types::event::{BalanceChangeType, Event};
 use sui_types::messages::{SignedTransactionEffects, TransactionKind, VerifiedCertificate};
 use sui_types::object::Owner;
 use sui_types::{batch::TxSequenceNumber, intent::ChainId};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 #[derive(Debug)]
 pub struct QueryableExporter {
@@ -553,7 +553,7 @@ impl QueryableExporter {
             datasource_exporter: RwLock::new(datasource_exporter),
             datasource_writer: RwLock::new(datasource_writer),
 
-            arg_values_len: 0
+            arg_values_len: 0,
         })
     }
 
