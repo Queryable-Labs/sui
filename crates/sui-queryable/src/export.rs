@@ -1305,7 +1305,7 @@ impl QueryableExporter {
 
             trace!("Arg values length {}", self.arg_values_len);
 
-            call_trace_writer.add_list_value_binary(
+            call_trace_writer.add_list_value_large_binary(
                 String::from("arg_values"),
                 Some(
                     call_trace
