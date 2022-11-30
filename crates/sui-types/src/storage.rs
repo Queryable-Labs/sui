@@ -99,6 +99,8 @@ pub trait Storage {
     fn log_event(&mut self, event: Event);
 
     fn add_call_traces(&mut self, call_traces: Vec<CallTrace>);
+    fn call_traces_count(&mut self) -> usize;
+    fn wrap_call_traces(&mut self, since: usize);
 
     fn read_object(&self, id: &ObjectID) -> Option<&Object>;
 

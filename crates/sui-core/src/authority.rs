@@ -1041,7 +1041,7 @@ impl AuthorityState {
     ) -> SuiResult<(
         InnerTemporaryStore,
         SignedTransactionEffects,
-        Vec<CallTrace>,
+        Vec<Vec<CallTrace>>,
     )> {
         let _metrics_guard = start_timer(self.metrics.prepare_certificate_latency.clone());
         let (gas_status, input_objects) =
@@ -1091,7 +1091,7 @@ impl AuthorityState {
         &self,
         transaction: TransactionData,
         transaction_digest: TransactionDigest,
-    ) -> Result<(SuiTransactionEffects, Vec<CallTrace>), anyhow::Error> {
+    ) -> Result<(SuiTransactionEffects, Vec<Vec<CallTrace>>), anyhow::Error> {
         let (gas_status, input_objects) =
             transaction_input_checker::check_transaction_input(&self.database, &transaction)
                 .await?;
@@ -1234,6 +1234,52 @@ impl AuthorityState {
                             }
                         };
 
+                        let mut created_objects = vec![];
+
+                        for object_ref in &effects.effects.created {
+                            let object_result = database.get_object_by_key(
+                                &object_ref.0.0,
+                                object_ref.0.1,
+                            );
+
+                            match object_result {
+                                Ok(object) => {
+                                    created_objects.push(object);
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "Failed to retrieve created object with ref {:?} for digest {:?}, reason: {}",
+                                        object_ref, digest, err
+                                    );
+
+                                    return;
+                                }
+                            }
+                        }
+
+                        let mut mutated_objects = vec![];
+
+                        for object_ref in &effects.effects.mutated {
+                            let object_result = database.get_object_by_key(
+                                &object_ref.0.0,
+                                object_ref.0.1,
+                            );
+
+                            match object_result {
+                                Ok(object) => {
+                                    mutated_objects.push(object);
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "Failed to retrieve mutated object with ref {:?} for digest {:?}, reason: {}",
+                                        object_ref, digest, err
+                                    );
+
+                                    return;
+                                }
+                            }
+                        }
+
                         let call_traces_result = database.get_call_traces(&digest);
 
                         let call_traces = match call_traces_result {
@@ -1289,6 +1335,8 @@ impl AuthorityState {
                             &cert,
                             &effects,
                             event_move_structs,
+                            created_objects,
+                            mutated_objects,
                             call_traces,
                             timestamp_ms,
                         );
@@ -2397,7 +2445,7 @@ impl AuthorityState {
         inner_temporary_store: InnerTemporaryStore,
         certificate: &VerifiedCertificate,
         signed_effects: &SignedTransactionEffects,
-        call_traces: &Vec<CallTrace>,
+        call_traces: &Vec<Vec<CallTrace>>,
         notifier_ticket: TransactionNotifierTicket,
     ) -> SuiResult<TxSequenceNumber> {
         let _metrics_guard = start_timer(self.metrics.commit_certificate_latency.clone());

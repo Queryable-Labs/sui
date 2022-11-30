@@ -60,7 +60,7 @@ pub fn execute_transaction_to_effects<S: BackingPackageStore + ParentSync + Chil
 ) -> (
     InnerTemporaryStore,
     TransactionEffects,
-    Vec<CallTrace>,
+    Vec<Vec<CallTrace>>,
     Option<ExecutionError>,
 ) {
     let mut tx_ctx = TxContext::new(&transaction_data.signer(), &transaction_digest, epoch);

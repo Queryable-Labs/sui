@@ -93,7 +93,7 @@ pub struct TemporaryStore<S> {
     deleted: BTreeMap<ObjectID, (SingleTxContext, SequenceNumber, DeleteKind)>,
     /// Ordered sequence of events emitted by execution
     events: Vec<Event>,
-    call_traces: Vec<CallTrace>,
+    call_traces: Vec<Vec<CallTrace>>,
     gas_charged: Option<(SuiAddress, ObjectID, GasCostSummary)>,
 }
 
@@ -122,7 +122,7 @@ impl<S> TemporaryStore<S> {
     }
 
     /// Break up the structure and return its internal stores (objects, active_inputs, written, deleted)
-    pub fn into_inner(self) -> (InnerTemporaryStore, Vec<Event>, Vec<CallTrace>) {
+    pub fn into_inner(self) -> (InnerTemporaryStore, Vec<Event>, Vec<Vec<CallTrace>>) {
         #[cfg(debug_assertions)]
         {
             self.check_invariants();
@@ -461,7 +461,7 @@ impl<S> TemporaryStore<S> {
         gas_cost_summary: GasCostSummary,
         status: ExecutionStatus,
         gas_object_ref: ObjectRef,
-    ) -> (InnerTemporaryStore, TransactionEffects, Vec<CallTrace>) {
+    ) -> (InnerTemporaryStore, TransactionEffects, Vec<Vec<CallTrace>>) {
         let written: BTreeMap<ObjectID, (ObjectRef, Owner, WriteKind)> = self
             .written
             .iter()
@@ -672,7 +672,18 @@ impl<S> TemporaryStore<S> {
     }
 
     pub fn add_call_traces(&mut self, call_traces: Vec<CallTrace>) {
-        self.call_traces.extend(call_traces);
+        self.call_traces.push(call_traces);
+    }
+
+    pub fn call_traces_count(&mut self) -> usize {
+        self.call_traces.len()
+    }
+
+    pub fn wrap_call_traces(&mut self, since: usize) {
+        let call_traces: Vec<CallTrace> = self.call_traces
+            .drain(since..).flatten().collect();
+
+        self.call_traces.push(call_traces);
     }
 
     pub fn read_object(&self, id: &ObjectID) -> Option<&Object> {
@@ -722,6 +733,13 @@ impl<S: ChildObjectResolver> Storage for TemporaryStore<S> {
 
     fn add_call_traces(&mut self, call_traces: Vec<CallTrace>) {
         TemporaryStore::add_call_traces(self, call_traces);
+    }
+
+    fn call_traces_count(&mut self) -> usize {
+        TemporaryStore::call_traces_count(self)
+    }
+    fn wrap_call_traces(&mut self, since: usize) {
+        TemporaryStore::wrap_call_traces(self, since);
     }
 
     fn read_object(&self, id: &ObjectID) -> Option<&Object> {

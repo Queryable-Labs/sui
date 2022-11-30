@@ -135,7 +135,7 @@ pub struct AuthorityPerpetualTables<S> {
     /// A map between the transaction digest of a certificate that was successfully processed and
     /// call traces that were generated during it execution.
     #[default_options_override_fn = "call_traces_table_default_config"]
-    pub(crate) call_traces: DBMap<TransactionDigest, Vec<CallTrace>>,
+    pub(crate) call_traces: DBMap<TransactionDigest, Vec<Vec<CallTrace>>>,
 
     // Tables used for authority batch structure
     // TODO: executed_sequence and batches both conceptually belong in AuthorityEpochTables,

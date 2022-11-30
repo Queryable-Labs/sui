@@ -218,6 +218,7 @@ fn execute_internal<
     ) = session
         .execute_function_bypass_visibility(module_id, function, type_args, args, gas_status)
         .and_then(|ret| Ok((ret, session.finish_with_extensions()?)))?;
+
     assert_invariant!(return_values.is_empty(), "Return values must be empty");
     let object_runtime: ObjectRuntime = native_context_extensions.remove();
     std::mem::drop(native_context_extensions);
@@ -406,6 +407,9 @@ fn init_modules<
     gas_status: &mut GasStatus,
 ) -> Result<(), ExecutionError> {
     let init_ident = Identifier::new(INIT_FN_NAME.as_str()).unwrap();
+
+    let call_traces_created = state_view.call_traces_count();
+
     for (module_id, num_args) in module_ids_to_init {
         let mut args = vec![];
         // an init function can have one or two arguments, with the last one always being of type
@@ -435,6 +439,9 @@ fn init_modules<
             ctx,
         )?;
     }
+
+    state_view.wrap_call_traces(call_traces_created);
+
     Ok(())
 }
 

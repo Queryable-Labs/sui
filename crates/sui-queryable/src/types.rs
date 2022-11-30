@@ -3,6 +3,7 @@ use sui_types::batch::TxSequenceNumber;
 
 pub const ENTITY_TRANSACTIONS_NAME: &str = "transactions";
 pub const ENTITY_EVENTS_NAME: &str = "events";
+pub const ENTITY_OBJECTS_NAME: &str = "objects";
 pub const ENTITY_CALL_TRACES_NAME: &str = "call_traces";
 
 pub const ENTITY_FIELD_ID: &str = "_id";

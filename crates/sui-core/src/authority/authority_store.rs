@@ -709,7 +709,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         certificate: &VerifiedCertificate,
         proposed_seq: TxSequenceNumber,
         effects: &TransactionEffectsEnvelope<S>,
-        call_traces: &Vec<CallTrace>,
+        call_traces: &Vec<Vec<CallTrace>>,
         effects_digest: &TransactionEffectsDigest,
     ) -> SuiResult<TxSequenceNumber> {
         // Extract the new state from the execution
@@ -1487,7 +1487,7 @@ impl SuiDataStore<AuthoritySignInfo> {
     pub fn get_call_traces(
         &self,
         transaction_digest: &TransactionDigest,
-    ) -> Result<Option<Vec<CallTrace>>, SuiError> {
+    ) -> Result<Option<Vec<Vec<CallTrace>>>, SuiError> {
         Ok(self.perpetual_tables.call_traces.get(transaction_digest)?)
     }
 
