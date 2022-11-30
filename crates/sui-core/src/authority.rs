@@ -1238,7 +1238,7 @@ impl AuthorityState {
 
                         for object_ref in &effects.effects.created {
                             let object_result =
-                                database.get_object_by_key(&object_ref.0.0, object_ref.0.1);
+                                database.get_object_by_key(&object_ref.0 .0, object_ref.0 .1);
 
                             match object_result {
                                 Ok(object) => {
@@ -1259,7 +1259,7 @@ impl AuthorityState {
 
                         for object_ref in &effects.effects.mutated {
                             let object_result =
-                                database.get_object_by_key(&object_ref.0.0, object_ref.0.1);
+                                database.get_object_by_key(&object_ref.0 .0, object_ref.0 .1);
 
                             match object_result {
                                 Ok(object) => {
