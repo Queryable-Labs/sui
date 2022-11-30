@@ -680,8 +680,7 @@ impl<S> TemporaryStore<S> {
     }
 
     pub fn wrap_call_traces(&mut self, since: usize) {
-        let call_traces: Vec<CallTrace> = self.call_traces
-            .drain(since..).flatten().collect();
+        let call_traces: Vec<CallTrace> = self.call_traces.drain(since..).flatten().collect();
 
         self.call_traces.push(call_traces);
     }

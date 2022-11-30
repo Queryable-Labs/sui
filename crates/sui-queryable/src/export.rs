@@ -1,4 +1,8 @@
-use crate::types::{LastExportData, ENTITY_CALL_TRACES_NAME, ENTITY_EVENTS_NAME, ENTITY_FIELD_ID, ENTITY_FIELD_RECORD_VERSION, ENTITY_FIELD_TIME_INDEX, ENTITY_FIELD_TX_HASH, ENTITY_FIELD_TX_INDEX, ENTITY_TRANSACTIONS_NAME, ENTITY_OBJECTS_NAME};
+use crate::types::{
+    LastExportData, ENTITY_CALL_TRACES_NAME, ENTITY_EVENTS_NAME, ENTITY_FIELD_ID,
+    ENTITY_FIELD_RECORD_VERSION, ENTITY_FIELD_TIME_INDEX, ENTITY_FIELD_TX_HASH,
+    ENTITY_FIELD_TX_INDEX, ENTITY_OBJECTS_NAME, ENTITY_TRANSACTIONS_NAME,
+};
 use bcs;
 use move_core_types::identifier::Identifier;
 use move_core_types::trace::{CallTrace, CallType};
@@ -7,19 +11,19 @@ use parking_lot::RwLock;
 use queryable_core::constant::PARQUET_METADATA_FIELD_NETWORK_ID;
 use queryable_core::datasource_exporter::DatasourceExporter;
 use queryable_core::datasource_writer::DatasourceWriter;
+use queryable_core::entity_writer::EntityWriter;
 use queryable_core::types::entity::{
     Entity, EntityField, EntityFieldEncoding, EntityFieldType, EntityRelation, EntityRelationType,
 };
 use queryable_core::writer_context::WriterContext;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use queryable_core::entity_writer::EntityWriter;
 use sui_types::base_types::{ObjectRef, TransactionDigest};
 use sui_types::event::{BalanceChangeType, Event};
-use sui_types::messages::{CallArg, SignedTransactionEffects, SingleTransactionKind, TransactionKind, VerifiedCertificate};
+use sui_types::messages::{SignedTransactionEffects, TransactionKind, VerifiedCertificate};
 use sui_types::object::{Object, Owner};
 use sui_types::{batch::TxSequenceNumber, intent::ChainId};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
 pub struct QueryableExporter {
@@ -33,7 +37,6 @@ pub struct QueryableExporter {
 
     datasource_exporter: RwLock<DatasourceExporter>,
     datasource_writer: RwLock<DatasourceWriter>,
-
     // arg_values_len: u64,
 }
 
@@ -134,48 +137,40 @@ impl QueryableExporter {
                         String::from("sender"),
                         EntityFieldType::Binary(false),
                     ),
-
                     EntityField::create_list_field(
                         String::from("shared_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_list_field(
                         String::from("created_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_list_field(
                         String::from("mutated_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_list_field(
                         String::from("deleted_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_list_field(
                         String::from("unwrapped_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_list_field(
                         String::from("wrapped_object_refs"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_field(
                         String::from("gas_object"),
                         EntityFieldType::Binary(true),
                     ),
-
                     EntityField::create_field(
                         String::from("gas_limit"),
                         EntityFieldType::Uint64(false),
@@ -218,13 +213,11 @@ impl QueryableExporter {
                         String::from("detailed_status"),
                         EntityFieldType::Binary(true),
                     ),
-
                     EntityField::create_list_field(
                         String::from("dependencies"),
                         true,
                         EntityFieldType::Binary(false),
                     )?,
-
                     EntityField::create_field(String::from("size"), EntityFieldType::Uint32(false)),
                     EntityField::create_field(String::from("time"), EntityFieldType::Uint64(true)),
                     EntityField::create_field(String::from("fee"), EntityFieldType::Uint64(false)),
@@ -490,17 +483,14 @@ impl QueryableExporter {
                         EntityFieldType::Binary(true),
                     ),
                     EntityField::create_field(String::from("time"), EntityFieldType::Uint64(true)),
-
                     EntityField::create_field(
                         String::from("operation_type"),
                         EntityFieldType::Uint8(true),
                     ),
-
                     EntityField::create_field(
                         String::from("module_address"),
                         EntityFieldType::Binary(false),
                     ),
-
                     EntityField::create_field(
                         String::from("object_name"),
                         EntityFieldType::Binary(false),
@@ -513,22 +503,18 @@ impl QueryableExporter {
                         String::from("object_version"),
                         EntityFieldType::Uint64(true),
                     ),
-
                     EntityField::create_field(
                         String::from("owner_type"),
                         EntityFieldType::Uint8(false),
                     ),
-
                     EntityField::create_field(
                         String::from("owner_id"),
                         EntityFieldType::Binary(false),
                     ),
-
                     EntityField::create_field(
                         String::from("content"),
                         EntityFieldType::Binary(false),
                     ),
-
                     EntityField::create_field(
                         String::from("storage_rebate"),
                         EntityFieldType::Uint64(false),
@@ -708,7 +694,6 @@ impl QueryableExporter {
 
             datasource_exporter: RwLock::new(datasource_exporter),
             datasource_writer: RwLock::new(datasource_writer),
-
             // arg_values_len: 0,
         })
     }
@@ -733,25 +718,23 @@ impl QueryableExporter {
         transaction_id: u64,
         tx_index: u64,
         time_index: u64,
-        tx_hash: &Vec<u8>,
+        tx_hash: Vec<u8>,
         timestamp_ms: u64,
         operation: u8,
         object_ref: Option<ObjectRef>,
         owner_ref: Option<Owner>,
-        object: Option<Object>
+        object: Option<Object>,
     ) -> anyhow::Result<u64> {
         entity_writer.add_value_u64(String::from(ENTITY_FIELD_ID), Some(record_id))?;
 
-        entity_writer
-            .add_value_u64(String::from("relation_transaction"), Some(transaction_id))?;
+        entity_writer.add_value_u64(String::from("relation_transaction"), Some(transaction_id))?;
 
         entity_writer.add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
 
         entity_writer.add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
         entity_writer.add_value_u64(String::from(ENTITY_FIELD_TIME_INDEX), Some(time_index))?;
 
-        entity_writer
-            .add_value_binary(String::from(ENTITY_FIELD_TX_HASH), Some(tx_hash.clone()))?;
+        entity_writer.add_value_binary(String::from(ENTITY_FIELD_TX_HASH), Some(tx_hash))?;
 
         entity_writer.add_value_u64(String::from("time"), Some(timestamp_ms))?;
 
@@ -905,9 +888,7 @@ impl QueryableExporter {
         }
 
         transaction_writer
-            .add_list_value_binary(String::from("shared_object_refs"), Some(
-                shared_object_refs
-            ))?;
+            .add_list_value_binary(String::from("shared_object_refs"), Some(shared_object_refs))?;
 
         let mut created_object_refs = vec![];
 
@@ -915,10 +896,10 @@ impl QueryableExporter {
             created_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
-        transaction_writer
-            .add_list_value_binary(String::from("created_object_refs"), Some(
-                created_object_refs
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("created_object_refs"),
+            Some(created_object_refs),
+        )?;
 
         let mut mutated_object_refs = vec![];
 
@@ -926,10 +907,10 @@ impl QueryableExporter {
             mutated_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
-        transaction_writer
-            .add_list_value_binary(String::from("mutated_object_refs"), Some(
-                mutated_object_refs
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("mutated_object_refs"),
+            Some(mutated_object_refs),
+        )?;
 
         let mut deleted_object_refs = vec![];
 
@@ -937,10 +918,10 @@ impl QueryableExporter {
             deleted_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
-        transaction_writer
-            .add_list_value_binary(String::from("deleted_object_refs"), Some(
-                deleted_object_refs
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("deleted_object_refs"),
+            Some(deleted_object_refs),
+        )?;
 
         let mut unwrapped_object_refs = vec![];
 
@@ -948,10 +929,10 @@ impl QueryableExporter {
             unwrapped_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
-        transaction_writer
-            .add_list_value_binary(String::from("unwrapped_object_refs"), Some(
-                unwrapped_object_refs
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("unwrapped_object_refs"),
+            Some(unwrapped_object_refs),
+        )?;
 
         let mut wrapped_object_refs = vec![];
 
@@ -959,10 +940,10 @@ impl QueryableExporter {
             wrapped_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
-        transaction_writer
-            .add_list_value_binary(String::from("wrapped_object_refs"), Some(
-                wrapped_object_refs
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("wrapped_object_refs"),
+            Some(wrapped_object_refs),
+        )?;
 
         transaction_writer.add_value_binary(
             String::from("gas_object"),
@@ -995,10 +976,17 @@ impl QueryableExporter {
             Some(effects.effects.gas_cost_summary().storage_rebate),
         )?;
 
-        transaction_writer
-            .add_list_value_binary(String::from("dependencies"), Some(
-                effects.effects.dependencies.iter().map(|dependency| Some(dependency.to_bytes())).collect()
-            ))?;
+        transaction_writer.add_list_value_binary(
+            String::from("dependencies"),
+            Some(
+                effects
+                    .effects
+                    .dependencies
+                    .iter()
+                    .map(|dependency| Some(dependency.to_bytes()))
+                    .collect(),
+            ),
+        )?;
 
         transaction_writer.add_value_u8(
             String::from("type"),
@@ -1546,56 +1534,52 @@ impl QueryableExporter {
         ////////////////
         ////////////////
 
-        for created_object in created_objects {
-            if let Some(object) = created_object {
-                let object_id= datasource_writer.get_next_id(String::from(ENTITY_OBJECTS_NAME))?;
+        for object in created_objects.into_iter().flatten() {
+            let object_id = datasource_writer.get_next_id(String::from(ENTITY_OBJECTS_NAME))?;
 
-                let object_writer = datasource_writer
-                    .get_writer(String::from(ENTITY_OBJECTS_NAME))
-                    .unwrap();
+            let object_writer = datasource_writer
+                .get_writer(String::from(ENTITY_OBJECTS_NAME))
+                .unwrap();
 
-                let object_id = Self::export_object(
-                    object_writer,
-                    object_id,
-                    transaction_id,
-                    tx_index,
-                    time_index,
-                    &tx_hash,
-                    timestamp_ms,
-                    0,
-                    None,
-                    None,
-                    Some(object)
-                )?;
+            let object_id = Self::export_object(
+                object_writer,
+                object_id,
+                transaction_id,
+                tx_index,
+                time_index,
+                tx_hash.clone(),
+                timestamp_ms,
+                0,
+                None,
+                None,
+                Some(object),
+            )?;
 
-                object_ids.push(Some(object_id));
-            }
+            object_ids.push(Some(object_id));
         }
 
-        for mutated_object in mutated_objects {
-            if let Some(object) = mutated_object {
-                let object_id= datasource_writer.get_next_id(String::from(ENTITY_OBJECTS_NAME))?;
+        for object in mutated_objects.into_iter().flatten() {
+            let object_id = datasource_writer.get_next_id(String::from(ENTITY_OBJECTS_NAME))?;
 
-                let object_writer = datasource_writer
-                    .get_writer(String::from(ENTITY_OBJECTS_NAME))
-                    .unwrap();
+            let object_writer = datasource_writer
+                .get_writer(String::from(ENTITY_OBJECTS_NAME))
+                .unwrap();
 
-                Self::export_object(
-                    object_writer,
-                    object_id,
-                    transaction_id,
-                    tx_index,
-                    time_index,
-                    &tx_hash,
-                    timestamp_ms,
-                    1,
-                    None,
-                    None,
-                    Some(object)
-                )?;
+            Self::export_object(
+                object_writer,
+                object_id,
+                transaction_id,
+                tx_index,
+                time_index,
+                tx_hash.clone(),
+                timestamp_ms,
+                1,
+                None,
+                None,
+                Some(object),
+            )?;
 
-                object_ids.push(Some(object_id));
-            }
+            object_ids.push(Some(object_id));
         }
 
         // @TODO: track wraps
@@ -1608,8 +1592,10 @@ impl QueryableExporter {
         ////////////////
         ////////////////
 
-        let single_transactions: Vec<&SingleTransactionKind> = cert.data().data.kind.single_transactions().collect();
-        let mut matched_single_tx_index: usize = 0;
+        // let single_transactions: Vec<&SingleTransactionKind> =
+        //     cert.data().data.kind.single_transactions().collect();
+
+        // let mut matched_single_tx_index: usize = 0;
 
         for call_traces in call_traces_per_tx_payload.iter() {
             for call_trace in call_traces {
@@ -1622,14 +1608,17 @@ impl QueryableExporter {
                     .get_writer(String::from(ENTITY_CALL_TRACES_NAME))
                     .unwrap();
 
-                call_trace_writer.add_value_u64(String::from(ENTITY_FIELD_ID), Some(call_trace_id))?;
+                call_trace_writer
+                    .add_value_u64(String::from(ENTITY_FIELD_ID), Some(call_trace_id))?;
 
                 call_trace_writer
                     .add_value_u64(String::from("relation_transaction"), Some(transaction_id))?;
 
-                call_trace_writer.add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
+                call_trace_writer
+                    .add_value_u8(String::from(ENTITY_FIELD_RECORD_VERSION), Some(1))?;
 
-                call_trace_writer.add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
+                call_trace_writer
+                    .add_value_u64(String::from(ENTITY_FIELD_TX_INDEX), Some(tx_index))?;
                 call_trace_writer
                     .add_value_u64(String::from(ENTITY_FIELD_TIME_INDEX), Some(time_index))?;
 
@@ -1765,21 +1754,17 @@ impl QueryableExporter {
                 call_trace_writer.append_record();
             }
 
-            matched_single_tx_index += 1;
+            // matched_single_tx_index += 1;
         }
 
         let transaction_writer = datasource_writer
             .get_writer(String::from(ENTITY_TRANSACTIONS_NAME))
             .unwrap();
 
-        transaction_writer.add_list_value_u64(
-            String::from("relation_events"),
-            Some(event_ids.clone())
-        )?;
-        transaction_writer.add_list_value_u64(
-            String::from("relation_objects"),
-            Some(object_ids.clone())
-        )?;
+        transaction_writer
+            .add_list_value_u64(String::from("relation_events"), Some(event_ids.clone()))?;
+        transaction_writer
+            .add_list_value_u64(String::from("relation_objects"), Some(object_ids.clone()))?;
         transaction_writer.add_list_value_u64(
             String::from("relation_call_traces"),
             Some(call_trace_ids.clone()),
