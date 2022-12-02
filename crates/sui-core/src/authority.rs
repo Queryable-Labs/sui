@@ -893,10 +893,8 @@ impl AuthorityState {
         // is to allow for retrying phase 2 from phase 1 in the case where we
         // fail mid-write. We prefer this over making the write to permanent
         // storage atomic as this allows for sharding storage across nodes, which
-        self.database.write_call_traces(
-            &digest,
-            call_traces.clone()
-        )?;
+        self.database
+            .write_call_traces(&digest, call_traces.clone())?;
 
         // would be more difficult in the alternative.
         self.database.wal.write_execution_output(

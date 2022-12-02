@@ -956,10 +956,8 @@ impl QueryableExporter {
         transaction_writer
             .add_value_u64(String::from("gas_price"), Some(cert.data().data.gas_price))?;
 
-        transaction_writer.add_value_u64(
-            String::from("gas_used"),
-            Some(effects.gas_used.gas_used()),
-        )?;
+        transaction_writer
+            .add_value_u64(String::from("gas_used"), Some(effects.gas_used.gas_used()))?;
 
         transaction_writer.add_value_u64(
             String::from("gas_computation_cost"),
@@ -1093,10 +1091,7 @@ impl QueryableExporter {
             Some(Vec::from(cert.tx_signature.as_ref())),
         )?;
 
-        transaction_writer.add_value_bool(
-            String::from("success"),
-            Some(effects.status.is_ok()),
-        )?;
+        transaction_writer.add_value_bool(String::from("success"), Some(effects.status.is_ok()))?;
         transaction_writer.add_value_binary(
             String::from("detailed_status"),
             Some(serde_json::to_vec(&effects.status)?),

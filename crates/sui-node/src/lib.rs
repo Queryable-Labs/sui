@@ -63,9 +63,9 @@ pub mod metrics;
 
 mod handle;
 pub use handle::SuiNodeHandle;
+use sui_core::checkpoints::CheckpointStore;
 use sui_queryable::export::QueryableExporter;
 use sui_types::intent::ChainId;
-use sui_core::checkpoints::CheckpointStore;
 
 pub struct SuiNode {
     grpc_server: tokio::task::JoinHandle<Result<()>>,

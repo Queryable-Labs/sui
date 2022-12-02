@@ -1589,7 +1589,11 @@ impl SuiDataStore<AuthoritySignInfo> {
         })
     }
 
-    pub fn write_call_traces(&self, transaction_digest: &TransactionDigest, call_traces: Vec<Vec<CallTrace>>) -> SuiResult {
+    pub fn write_call_traces(
+        &self,
+        transaction_digest: &TransactionDigest,
+        call_traces: Vec<Vec<CallTrace>>,
+    ) -> SuiResult {
         let mut call_traces_write_batch = self.perpetual_tables.call_traces.batch();
 
         call_traces_write_batch = call_traces_write_batch.insert_batch(
