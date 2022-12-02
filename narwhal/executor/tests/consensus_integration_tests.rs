@@ -50,6 +50,7 @@ async fn test_recovery() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -70,6 +71,7 @@ async fn test_recovery() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -91,8 +93,11 @@ async fn test_recovery() {
     let mut consensus_index_counter = 0;
     let num_of_committed_certificates = 5;
 
+    let committed_sub_dag = rx_output.recv().await.unwrap();
+    let leader_round = committed_sub_dag.leader.round();
+    let mut sequence = committed_sub_dag.certificates.into_iter();
     for i in 1..=num_of_committed_certificates {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.consensus_index, consensus_index_counter);
 
         if i < 5 {
@@ -116,6 +121,7 @@ async fn test_recovery() {
                 next_certificate_index: last_executed_certificate_index,
                 next_batch_index: 0,
                 next_transaction_index: 0,
+                last_committed_round: leader_round,
             });
 
         let consensus_output = get_restored_consensus_output(
@@ -126,11 +132,12 @@ async fn test_recovery() {
         .await
         .unwrap();
 
-        // we expect to have recovered all the certificates between the "last executed certificate" (included)
-        // up to the "last committed certificate" (included).
-        assert_eq!(
-            consensus_output.len(),
-            (num_of_committed_certificates - last_executed_certificate_index) as usize
+        // we expect to have recovered all the certificates from the last commit. The Sui executor engine
+        // will not execute twice the same certificate.
+        assert_eq!(consensus_output.len(), 1);
+        assert!(
+            consensus_output[0].len()
+                >= (num_of_committed_certificates - last_executed_certificate_index) as usize
         );
     }
 }

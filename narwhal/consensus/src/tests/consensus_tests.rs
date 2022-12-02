@@ -14,8 +14,8 @@ use tokio::sync::watch;
 
 use crate::bullshark::Bullshark;
 use crate::metrics::ConsensusMetrics;
-use crate::{Consensus, ConsensusOutput};
-use types::{Certificate, ReconfigureNotification};
+use crate::Consensus;
+use types::{Certificate, ConsensusOutput, ReconfigureNotification};
 
 /// This test is trying to compare the output of the Consensus algorithm when:
 /// (1) running without any crash for certificates processed from round 1 to 5 (inclusive)
@@ -54,6 +54,7 @@ async fn test_consensus_recovery_with_bullshark() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(100);
     let (tx_primary, _rx_primary) = test_utils::test_channel!(100);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee.clone());
@@ -74,6 +75,7 @@ async fn test_consensus_recovery_with_bullshark() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics.clone(),
@@ -102,18 +104,20 @@ async fn test_consensus_recovery_with_bullshark() {
     // without any crash.
     let mut committed_output_no_crash: Vec<ConsensusOutput> = Vec::new();
 
-    while let Some(output) = rx_output.recv().await {
-        assert_eq!(output.consensus_index, consensus_index_counter);
-        assert!(output.certificate.round() <= 4);
+    'main: while let Some(sub_dag) = rx_output.recv().await {
+        for output in sub_dag.certificates {
+            assert_eq!(output.consensus_index, consensus_index_counter);
+            assert!(output.certificate.round() <= 4);
 
-        committed_output_no_crash.push(output.clone());
+            committed_output_no_crash.push(output.clone());
 
-        consensus_index_counter += 1;
+            consensus_index_counter += 1;
 
-        // we received the leader of round 4, now stop as we don't expect to see any other
-        // certificate from that or higher round.
-        if output.certificate.round() == 4 {
-            break;
+            // we received the leader of round 4, now stop as we don't expect to see any other
+            // certificate from that or higher round.
+            if output.certificate.round() == 4 {
+                break 'main;
+            }
         }
     }
 
@@ -141,6 +145,7 @@ async fn test_consensus_recovery_with_bullshark() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(100);
     let (tx_primary, _rx_primary) = test_utils::test_channel!(100);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let storage = NodeStorage::reopen(temp_dir());
 
@@ -161,6 +166,7 @@ async fn test_consensus_recovery_with_bullshark() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics.clone(),
@@ -188,18 +194,20 @@ async fn test_consensus_recovery_with_bullshark() {
     let mut consensus_index_counter = 0;
     let mut committed_output_before_crash: Vec<ConsensusOutput> = Vec::new();
 
-    while let Some(output) = rx_output.recv().await {
-        assert_eq!(output.consensus_index, consensus_index_counter);
-        assert!(output.certificate.round() <= 2);
+    'main: while let Some(sub_dag) = rx_output.recv().await {
+        for output in sub_dag.certificates {
+            assert_eq!(output.consensus_index, consensus_index_counter);
+            assert!(output.certificate.round() <= 2);
 
-        committed_output_before_crash.push(output.clone());
+            committed_output_before_crash.push(output.clone());
 
-        consensus_index_counter += 1;
+            consensus_index_counter += 1;
 
-        // we received the leader of round 2, now stop as we don't expect to see any other
-        // certificate from that or higher round.
-        if output.certificate.round() == 2 {
-            break;
+            // we received the leader of round 2, now stop as we don't expect to see any other
+            // certificate from that or higher round.
+            if output.certificate.round() == 2 {
+                break 'main;
+            }
         }
     }
 
@@ -211,6 +219,7 @@ async fn test_consensus_recovery_with_bullshark() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(100);
     let (tx_primary, _rx_primary) = test_utils::test_channel!(100);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let bullshark = Bullshark::new(
         committee.clone(),
@@ -226,6 +235,7 @@ async fn test_consensus_recovery_with_bullshark() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics.clone(),
@@ -243,18 +253,20 @@ async fn test_consensus_recovery_with_bullshark() {
     // AND capture the committed output
     let mut committed_output_after_crash: Vec<ConsensusOutput> = Vec::new();
 
-    while let Some(output) = rx_output.recv().await {
-        assert_eq!(output.consensus_index, consensus_index_counter);
-        assert!(output.certificate.round() >= 2);
+    'main: while let Some(sub_dag) = rx_output.recv().await {
+        for output in sub_dag.certificates {
+            assert_eq!(output.consensus_index, consensus_index_counter);
+            assert!(output.certificate.round() >= 2);
 
-        committed_output_after_crash.push(output.clone());
+            committed_output_after_crash.push(output.clone());
 
-        consensus_index_counter += 1;
+            consensus_index_counter += 1;
 
-        // we received the leader of round 4, now stop as we don't expect to see any other
-        // certificate from that or higher round.
-        if output.certificate.round() == 4 {
-            break;
+            // we received the leader of round 4, now stop as we don't expect to see any other
+            // certificate from that or higher round.
+            if output.certificate.round() == 4 {
+                break 'main;
+            }
         }
     }
 

@@ -7,13 +7,14 @@ use crate::{
     metrics::WorkerChannelMetrics,
     primary_connector::PrimaryConnector,
     quorum_waiter::QuorumWaiter,
+    TransactionValidator,
 };
 use anemo::types::Address;
 use anemo::{types::PeerInfo, Network, PeerId};
 use anemo_tower::{
     auth::{AllowedPeers, RequireAuthorizationLayer},
     callback::CallbackLayer,
-    trace::TraceLayer,
+    trace::{DefaultMakeSpan, TraceLayer},
 };
 use async_trait::async_trait;
 use config::{Parameters, SharedCommittee, SharedWorkerCache, WorkerId};
@@ -22,6 +23,7 @@ use futures::StreamExt;
 use multiaddr::{Multiaddr, Protocol};
 use network::metrics::MetricsMakeCallbackHandler;
 use network::P2pNetwork;
+use std::collections::HashMap;
 use std::{net::Ipv4Addr, sync::Arc};
 use store::Store;
 use sui_metrics::spawn_monitored_task;
@@ -74,6 +76,7 @@ impl Worker {
         committee: SharedCommittee,
         worker_cache: SharedWorkerCache,
         parameters: Parameters,
+        validator: impl TransactionValidator,
         store: Store<BatchDigest, Batch>,
         metrics: Metrics,
     ) -> Vec<JoinHandle<()>> {
@@ -121,6 +124,7 @@ impl Worker {
             id: worker.id,
             tx_others_batch,
             store: worker.store.clone(),
+            validator: validator.clone(),
         });
         let primary_service = PrimaryToWorkerServer::new(PrimaryReceiverHandler {
             name: worker.primary_name.clone(),
@@ -131,6 +135,7 @@ impl Worker {
             request_batch_timeout: worker.parameters.sync_retry_delay,
             request_batch_retry_nodes: worker.parameters.sync_retry_nodes,
             tx_reconfigure,
+            validator: validator.clone(),
         });
 
         // Receive incoming messages from other workers.
@@ -162,14 +167,20 @@ impl Worker {
             .merge(primary_to_worker_router);
 
         let service = ServiceBuilder::new()
-            .layer(TraceLayer::new_for_server_errors())
+            .layer(
+                TraceLayer::new_for_server_errors()
+                    .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO)),
+            )
             .layer(CallbackLayer::new(MetricsMakeCallbackHandler::new(
                 inbound_network_metrics,
             )))
             .service(routes);
 
         let outbound_layer = ServiceBuilder::new()
-            .layer(TraceLayer::new_for_client_and_server_errors())
+            .layer(
+                TraceLayer::new_for_client_and_server_errors()
+                    .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO)),
+            )
             .layer(CallbackLayer::new(MetricsMakeCallbackHandler::new(
                 outbound_network_metrics,
             )))
@@ -196,10 +207,7 @@ impl Worker {
 
         info!("Worker {} listening to worker messages on {}", id, address);
 
-        let connection_monitor_handle = network::connectivity::ConnectionMonitor::spawn(
-            network.downgrade(),
-            network_connection_metrics,
-        );
+        let mut peer_types = HashMap::new();
 
         let other_workers = worker
             .worker_cache
@@ -211,6 +219,7 @@ impl Worker {
         // Add other workers we want to talk with to the known peers set.
         for (public_key, address) in other_workers {
             let (peer_id, address) = Self::add_peer_in_network(&network, public_key, &address);
+            peer_types.insert(peer_id, "other_worker".to_string());
             info!(
                 "Adding others workers with peer id {} and address {}",
                 peer_id, address
@@ -230,9 +239,27 @@ impl Worker {
 
         let (peer_id, address) =
             Self::add_peer_in_network(&network, primary_network_key.clone(), &primary_address);
+        peer_types.insert(peer_id, "our_primary".to_string());
         info!(
             "Adding our primary with peer id {} and address {}",
             peer_id, address
+        );
+
+        // update the peer_types with the "other_primary". We do not add them in the Network
+        // struct, otherwise the networking library will try to connect to it
+        let other_primaries: Vec<(PublicKey, Multiaddr, NetworkPublicKey)> =
+            committee.load().others_primaries(&primary_name);
+        for (_, _, network_key) in other_primaries {
+            peer_types.insert(
+                PeerId(network_key.0.to_bytes()),
+                "other_primary".to_string(),
+            );
+        }
+
+        let connection_monitor_handle = network::connectivity::ConnectionMonitor::spawn(
+            network.downgrade(),
+            network_connection_metrics,
+            peer_types,
         );
 
         let network_admin_server_base_port = parameters
@@ -265,6 +292,7 @@ impl Worker {
             node_metrics,
             channel_metrics,
             endpoint_metrics,
+            validator,
             network,
         );
 
@@ -314,6 +342,7 @@ impl Worker {
         node_metrics: Arc<WorkerMetrics>,
         channel_metrics: Arc<WorkerChannelMetrics>,
         endpoint_metrics: WorkerEndpointMetrics,
+        validator: impl TransactionValidator,
         network: anemo::Network,
     ) -> Vec<JoinHandle<()>> {
         let (tx_batch_maker, rx_batch_maker) = channel_with_total(
@@ -337,11 +366,11 @@ impl Worker {
         let address = address
             .replace(0, |_protocol| Some(Protocol::Ip4(Ipv4Addr::UNSPECIFIED)))
             .unwrap();
-        let tx_receiver_handle = TxReceiverHandler { tx_batch_maker }.spawn(
-            address.clone(),
-            rx_reconfigure.clone(),
-            endpoint_metrics,
-        );
+        let tx_receiver_handle = TxReceiverHandler {
+            tx_batch_maker,
+            validator,
+        }
+        .spawn(address.clone(), rx_reconfigure.clone(), endpoint_metrics);
 
         // The transactions are sent to the `BatchMaker` that assembles them into batches. It then broadcasts
         // (in a reliable manner) the batches to all other workers that share the same `id` as us. Finally, it
@@ -382,11 +411,12 @@ impl Worker {
 
 /// Defines how the network receiver handles incoming transactions.
 #[derive(Clone)]
-struct TxReceiverHandler {
+struct TxReceiverHandler<V> {
     tx_batch_maker: Sender<(Transaction, TxResponse)>,
+    validator: V,
 }
 
-impl TxReceiverHandler {
+impl<V: TransactionValidator> TxReceiverHandler<V> {
     async fn wait_for_shutdown(mut rx_reconfigure: watch::Receiver<ReconfigureNotification>) {
         loop {
             let result = rx_reconfigure.changed().await;
@@ -422,7 +452,7 @@ impl TxReceiverHandler {
 }
 
 #[async_trait]
-impl Transactions for TxReceiverHandler {
+impl<V: TransactionValidator> Transactions for TxReceiverHandler<V> {
     async fn submit_transaction(
         &self,
         request: Request<TransactionProto>,
@@ -434,6 +464,9 @@ impl Transactions for TxReceiverHandler {
                 message.len(),
                 MAX_ALLOWED_TRANSACTION_SIZE
             )));
+        }
+        if self.validator.validate(message.as_ref()).is_err() {
+            return Err(Status::invalid_argument("Invalid transaction"));
         }
         // Send the transaction to the batch maker.
         let (notifier, when_done) = tokio::sync::oneshot::channel();
@@ -458,6 +491,12 @@ impl Transactions for TxReceiverHandler {
         let mut responses = Vec::new();
 
         while let Some(Ok(txn)) = transactions.next().await {
+            if let Err(err) = self.validator.validate(txn.transaction.as_ref()) {
+                // If the transaction is invalid (often cryptographically), better to drop the client
+                return Err(Status::invalid_argument(format!(
+                    "Stream contains an invalid transaction {err}"
+                )));
+            }
             // Send the transaction to the batch maker.
             let (notifier, when_done) = tokio::sync::oneshot::channel();
             self.tx_batch_maker

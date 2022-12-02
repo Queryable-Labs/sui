@@ -72,11 +72,6 @@ pub trait AuthorityAPI {
         request: CheckpointRequest,
     ) -> Result<CheckpointResponse, SuiError>;
 
-    async fn handle_checkpoint_stream(
-        &self,
-        request: CheckpointStreamRequest,
-    ) -> Result<CheckpointStreamResponseItemStream, SuiError>;
-
     async fn handle_committee_info_request(
         &self,
         request: CommitteeInfoRequest,
@@ -84,8 +79,6 @@ pub trait AuthorityAPI {
 }
 
 pub type BatchInfoResponseItemStream = BoxStream<'static, Result<BatchInfoResponseItem, SuiError>>;
-pub type CheckpointStreamResponseItemStream =
-    BoxStream<'static, Result<CheckpointStreamResponseItem, SuiError>>;
 
 #[derive(Clone)]
 pub struct NetworkAuthorityClient {
@@ -250,21 +243,6 @@ impl AuthorityAPI for NetworkAuthorityClient {
             .map_err(Into::into)
     }
 
-    /// Stream checkpoint notifications
-    async fn handle_checkpoint_stream(
-        &self,
-        request: CheckpointStreamRequest,
-    ) -> Result<CheckpointStreamResponseItemStream, SuiError> {
-        let stream = self
-            .client()
-            .checkpoint_info(request)
-            .await
-            .map(tonic::Response::into_inner)?
-            .map_err(Into::into);
-
-        Ok(Box::pin(stream))
-    }
-
     async fn handle_committee_info_request(
         &self,
         request: CommitteeInfoRequest,
@@ -286,7 +264,7 @@ pub fn make_network_authority_client_sets_from_system_state(
     sui_system_state: &SuiSystemState,
     network_config: &Config,
     network_metrics: Arc<NetworkAuthorityClientMetrics>,
-) -> anyhow::Result<BTreeMap<AuthorityPublicKeyBytes, NetworkAuthorityClient>> {
+) -> anyhow::Result<BTreeMap<AuthorityName, NetworkAuthorityClient>> {
     let mut authority_clients = BTreeMap::new();
     for validator in &sui_system_state.validators.active_validators {
         let address = Multiaddr::try_from(validator.metadata.net_address.clone())?;
@@ -294,8 +272,8 @@ pub fn make_network_authority_client_sets_from_system_state(
             .connect_lazy(&address)
             .map_err(|err| anyhow!(err.to_string()))?;
         let client = NetworkAuthorityClient::new(channel, network_metrics.clone());
-        let name: &[u8] = &validator.metadata.name;
-        let public_key_bytes = AuthorityPublicKeyBytes::from_bytes(name)?;
+        let name: &[u8] = &validator.metadata.pubkey_bytes;
+        let public_key_bytes = AuthorityName::from_bytes(name)?;
         authority_clients.insert(public_key_bytes, client);
     }
     Ok(authority_clients)
@@ -305,7 +283,7 @@ pub fn make_network_authority_client_sets_from_committee(
     committee: &CommitteeWithNetAddresses,
     network_config: &Config,
     network_metrics: Arc<NetworkAuthorityClientMetrics>,
-) -> anyhow::Result<BTreeMap<AuthorityPublicKeyBytes, NetworkAuthorityClient>> {
+) -> anyhow::Result<BTreeMap<AuthorityName, NetworkAuthorityClient>> {
     let mut authority_clients = BTreeMap::new();
     for (name, _stakes) in &committee.committee.voting_rights {
         let address = committee.net_addresses.get(name).ok_or_else(|| {
@@ -469,14 +447,6 @@ impl AuthorityAPI for LocalAuthorityClient {
         state.handle_checkpoint_request(&request)
     }
 
-    async fn handle_checkpoint_stream(
-        &self,
-        request: CheckpointStreamRequest,
-    ) -> Result<CheckpointStreamResponseItemStream, SuiError> {
-        let stream = self.state.handle_checkpoint_streaming(request).await?;
-        Ok(Box::pin(stream))
-    }
-
     async fn handle_committee_info_request(
         &self,
         request: CommitteeInfoRequest,
@@ -496,7 +466,6 @@ impl LocalAuthorityClient {
             &secret,
             None,
             Some(genesis),
-            None,
             tx_reconfigure_consensus,
         )
         .await;

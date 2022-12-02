@@ -37,6 +37,10 @@ impl GAS {
     pub fn type_tag() -> TypeTag {
         TypeTag::Struct(Self::type_())
     }
+
+    pub fn is_gas(other: &StructTag) -> bool {
+        &Self::type_() == other
+    }
 }
 
 /// Rust version of the Move sui::coin::Coin<Sui::sui::SUI> type
@@ -65,7 +69,7 @@ impl GasCoin {
     }
 
     pub fn to_object(&self, version: SequenceNumber) -> MoveObject {
-        MoveObject::new_gas_coin(version, self.to_bcs_bytes())
+        MoveObject::new_gas_coin(version, *self.id(), self.value())
     }
 
     pub fn layout() -> MoveStructLayout {

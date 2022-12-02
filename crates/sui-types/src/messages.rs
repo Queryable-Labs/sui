@@ -2,33 +2,32 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use super::{base_types::*, batch::*, committee::Committee, error::*, event::Event};
+use crate::certificate_proof::CertificateProof;
 use crate::committee::{EpochId, StakeUnit};
 use crate::crypto::{
-    sha3_hash, AuthoritySignInfo, AuthoritySignInfoTrait, AuthoritySignature,
-    AuthorityStrongQuorumSignInfo, Ed25519SuiSignature, EmptySignInfo, Signable, Signature,
-    SignatureScheme, SuiSignature, SuiSignatureInner, ToFromBytes,
+    sha3_hash, AuthoritySignInfo, AuthoritySignature, AuthorityStrongQuorumSignInfo,
+    Ed25519SuiSignature, EmptySignInfo, Signable, Signature, SignatureScheme, SuiSignature,
+    SuiSignatureInner, ToFromBytes,
 };
 use crate::gas::GasCostSummary;
 use crate::message_envelope::{Envelope, Message, TrustedEnvelope, VerifiedEnvelope};
 use crate::messages_checkpoint::{
-    AuthenticatedCheckpoint, CheckpointSequenceNumber, SignedCheckpointFragmentMessage,
+    AuthenticatedCheckpoint, CheckpointSequenceNumber, CheckpointSignatureMessage,
 };
 use crate::object::{Object, ObjectFormatOptions, Owner, OBJECT_START_VERSION};
 use crate::storage::{DeleteKind, WriteKind};
 use crate::{SUI_SYSTEM_STATE_OBJECT_ID, SUI_SYSTEM_STATE_OBJECT_SHARED_VERSION};
 use byteorder::{BigEndian, ReadBytesExt};
-use fastcrypto::encoding::{Base64, Encoding};
+use fastcrypto::encoding::{Base64, Encoding, Hex};
 use itertools::Either;
 use move_binary_format::access::ModuleAccess;
-use move_binary_format::file_format::LocalIndex;
+use move_binary_format::file_format::{CodeOffset, LocalIndex, TypeParameterIndex};
 use move_binary_format::CompiledModule;
 use move_core_types::language_storage::ModuleId;
 use move_core_types::{
     account_address::AccountAddress, identifier::Identifier, language_storage::TypeTag,
     value::MoveStructLayout,
 };
-use name_variant::NamedVariant;
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::Bytes;
@@ -39,6 +38,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     hash::{Hash, Hasher},
 };
+use strum::IntoStaticStr;
 use tracing::debug;
 
 #[cfg(test)]
@@ -356,7 +356,7 @@ impl Display for SingleTransactionKind {
                 let (object_id, seq, digest) = t.object_ref;
                 writeln!(writer, "Object ID : {}", &object_id)?;
                 writeln!(writer, "Sequence Number : {:?}", seq)?;
-                writeln!(writer, "Object Digest : {}", encode_bytes_hex(digest.0))?;
+                writeln!(writer, "Object Digest : {}", Hex::encode(digest.0))?;
             }
             Self::TransferSui(t) => {
                 writeln!(writer, "Transaction Kind : Transfer SUI")?;
@@ -373,7 +373,7 @@ impl Display for SingleTransactionKind {
                 for (object_id, seq, digest) in &p.coins {
                     writeln!(writer, "Object ID : {}", &object_id)?;
                     writeln!(writer, "Sequence Number : {:?}", seq)?;
-                    writeln!(writer, "Object Digest : {}", encode_bytes_hex(digest.0))?;
+                    writeln!(writer, "Object Digest : {}", Hex::encode(digest.0))?;
                 }
                 writeln!(writer, "Recipients:")?;
                 for recipient in &p.recipients {
@@ -390,7 +390,7 @@ impl Display for SingleTransactionKind {
                 for (object_id, seq, digest) in &p.coins {
                     writeln!(writer, "Object ID : {}", &object_id)?;
                     writeln!(writer, "Sequence Number : {:?}", seq)?;
-                    writeln!(writer, "Object Digest : {}", encode_bytes_hex(digest.0))?;
+                    writeln!(writer, "Object Digest : {}", Hex::encode(digest.0))?;
                 }
                 writeln!(writer, "Recipients:")?;
                 for recipient in &p.recipients {
@@ -407,7 +407,7 @@ impl Display for SingleTransactionKind {
                 for (object_id, seq, digest) in &p.coins {
                     writeln!(writer, "Object ID : {}", &object_id)?;
                     writeln!(writer, "Sequence Number : {:?}", seq)?;
-                    writeln!(writer, "Object Digest : {}", encode_bytes_hex(digest.0))?;
+                    writeln!(writer, "Object Digest : {}", Hex::encode(digest.0))?;
                 }
                 writeln!(writer, "Recipient:")?;
                 writeln!(writer, "{}", &p.recipient)?;
@@ -437,7 +437,7 @@ impl Display for SingleTransactionKind {
 
 // TODO: Make SingleTransactionKind a Box
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, NamedVariant)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, IntoStaticStr)]
 pub enum TransactionKind {
     /// A single transaction.
     Single(SingleTransactionKind),
@@ -723,7 +723,7 @@ impl TransactionData {
 
     /// Returns the transaction kind as a &str (variant name, no fields)
     pub fn kind_as_str(&self) -> &'static str {
-        self.kind.variant_name()
+        (&self.kind).into()
     }
 
     pub fn gas(&self) -> ObjectRef {
@@ -910,33 +910,12 @@ impl Transaction {
     }
 }
 
-/// A transaction that is signed by a sender and also by an authority.
-pub type SignedTransaction = Envelope<SenderSignedData, AuthoritySignInfo>;
-pub type VerifiedSignedTransaction = VerifiedEnvelope<SenderSignedData, AuthoritySignInfo>;
-
-impl VerifiedSignedTransaction {
-    /// Use signing key to create a signed object.
-    pub fn new(
-        epoch: EpochId,
-        transaction: VerifiedTransaction,
-        authority: AuthorityName,
-        secret: &dyn signature::Signer<AuthoritySignature>,
-    ) -> Self {
-        Self::new_from_verified(SignedTransaction::new(
-            epoch,
-            transaction.into_inner().into_data(),
-            secret,
-            authority,
-        ))
-    }
-
+impl VerifiedTransaction {
     pub fn new_change_epoch(
         next_epoch: EpochId,
         storage_charge: u64,
         computation_charge: u64,
         storage_rebate: u64,
-        authority: AuthorityName,
-        secret: &dyn signature::Signer<AuthoritySignature>,
     ) -> Self {
         let kind = TransactionKind::Single(SingleTransactionKind::ChangeEpoch(ChangeEpoch {
             epoch: next_epoch,
@@ -958,9 +937,25 @@ impl VerifiedSignedTransaction {
                 .unwrap()
                 .into(),
         };
+        Self::new_from_verified(Transaction::new(signed_data))
+    }
+}
+
+/// A transaction that is signed by a sender and also by an authority.
+pub type SignedTransaction = Envelope<SenderSignedData, AuthoritySignInfo>;
+pub type VerifiedSignedTransaction = VerifiedEnvelope<SenderSignedData, AuthoritySignInfo>;
+
+impl VerifiedSignedTransaction {
+    /// Use signing key to create a signed object.
+    pub fn new(
+        epoch: EpochId,
+        transaction: VerifiedTransaction,
+        authority: AuthorityName,
+        secret: &dyn signature::Signer<AuthoritySignature>,
+    ) -> Self {
         Self::new_from_verified(SignedTransaction::new(
-            next_epoch,
-            signed_data,
+            epoch,
+            transaction.into_inner().into_data(),
             secret,
             authority,
         ))
@@ -1233,6 +1228,10 @@ pub enum ExecutionFailureStatus {
     ModuleNotFound,
     FunctionNotFound,
     InvariantViolation,
+    MoveObjectTooBig {
+        object_size: u32,
+        max_object_size: u32,
+    },
 
     //
     // Transfer errors
@@ -1241,6 +1240,7 @@ pub enum ExecutionFailureStatus {
     InvalidTransferSui,
     InvalidTransferSuiInsufficientBalance,
     InvalidCoinObject,
+    InvalidCoinMetadataObject,
 
     //
     // Pay errors
@@ -1264,6 +1264,7 @@ pub enum ExecutionFailureStatus {
     NonEntryFunctionInvoked,
     EntryTypeArityMismatch,
     EntryArgumentError(EntryArgumentError),
+    EntryTypeArgumentError(EntryTypeArgumentError),
     CircularObjectOwnership(CircularObjectOwnership),
     InvalidChildObjectArgument(InvalidChildObjectArgument),
     InvalidSharedByValue(InvalidSharedByValue),
@@ -1289,13 +1290,20 @@ pub enum ExecutionFailureStatus {
     //
     // Errors from the Move VM
     //
-    // TODO module id + func def + offset?
-    MovePrimitiveRuntimeError,
+    // Indicates an error from a non-abort instruction
+    MovePrimitiveRuntimeError(Option<MoveLocation>),
     /// Indicates and `abort` from inside Move code. Contains the location of the abort and the
     /// abort code
-    MoveAbort(ModuleId, u64), // TODO func def + offset?
+    MoveAbort(MoveLocation, u64), // TODO func def + offset?
     VMVerificationOrDeserializationError,
     VMInvariantViolation,
+}
+
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize, Hash)]
+pub struct MoveLocation {
+    pub module: ModuleId,
+    pub function: u16,
+    pub instruction: CodeOffset,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
@@ -1312,6 +1320,20 @@ pub enum EntryArgumentErrorKind {
     ObjectKindMismatch,
     UnsupportedPureArg,
     ArityMismatch,
+}
+
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
+pub struct EntryTypeArgumentError {
+    pub argument_idx: TypeParameterIndex,
+    pub kind: EntryTypeArgumentErrorKind,
+}
+
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
+pub enum EntryTypeArgumentErrorKind {
+    ModuleNotFound,
+    TypeNotFound,
+    ArityMismatch,
+    ConstraintNotSatisfied,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
@@ -1333,6 +1355,13 @@ pub struct InvalidSharedByValue {
 impl ExecutionFailureStatus {
     pub fn entry_argument_error(argument_idx: LocalIndex, kind: EntryArgumentErrorKind) -> Self {
         EntryArgumentError { argument_idx, kind }.into()
+    }
+
+    pub fn entry_type_argument_error(
+        argument_idx: TypeParameterIndex,
+        kind: EntryTypeArgumentErrorKind,
+    ) -> Self {
+        EntryTypeArgumentError { argument_idx, kind }.into()
     }
 
     pub fn circular_object_ownership(object: ObjectID) -> Self {
@@ -1377,7 +1406,8 @@ impl Display for ExecutionFailureStatus {
             ExecutionFailureStatus::InvalidTransactionUpdate => {
                 write!(f, "Invalid Transaction Update.")
             }
-            ExecutionFailureStatus::ModuleNotFound => write!(f, "Module Not Found."),
+            ExecutionFailureStatus::ModuleNotFound => write!(f, "Module Not Found."),  
+            ExecutionFailureStatus::MoveObjectTooBig { object_size, max_object_size } => write!(f, "Move object with size {object_size} is larger than the maximum object size {max_object_size}"),       
             ExecutionFailureStatus::FunctionNotFound => write!(f, "Function Not Found."),
             ExecutionFailureStatus::InvariantViolation => write!(f, "INVARIANT VIOLATION."),
             ExecutionFailureStatus::InvalidTransferObject => write!(
@@ -1405,7 +1435,10 @@ impl Display for ExecutionFailureStatus {
                 "Number of type arguments does not match the expected value",
             ),
             ExecutionFailureStatus::EntryArgumentError(data) => {
-                write!(f, "Entry Argument Type Error. {data}")
+                write!(f, "Entry Argument Error. {data}")
+            }
+            ExecutionFailureStatus::EntryTypeArgumentError(data) => {
+                write!(f, "Entry Type Argument Error. {data}")
             }
             ExecutionFailureStatus::CircularObjectOwnership(data) => {
                 write!(f, "Circular  Object Ownership. {data}")
@@ -1465,13 +1498,23 @@ impl Display for ExecutionFailureStatus {
                 "Sui Move Bytecode Verification Error. \
                 Please run the Sui Move Verifier for more information."
             ),
-            ExecutionFailureStatus::MovePrimitiveRuntimeError => write!(
-                f,
-                "Move Primitive Runtime Error. \
-                Arithmetic error, stack overflow, max value depth, etc."
-            ),
-            ExecutionFailureStatus::MoveAbort(m, c) => {
-                write!(f, "Move Runtime Abort. Module: {}, Status Code: {}", m, c)
+            ExecutionFailureStatus::MovePrimitiveRuntimeError(location) => {
+                write!(f, "Move Primitive Runtime Error. Location: ")?;
+                match location {
+                    None => write!(f, "UNKNOWN")?,
+                    Some(l) => write!(f, "{l}")?,
+                }
+                write!(
+                    f,
+                    ". Arithmetic error, stack overflow, max value depth, etc."
+                )
+            }
+            ExecutionFailureStatus::MoveAbort(location, c) => {
+                write!(
+                    f,
+                    "Move Runtime Abort. Location: {}, Abort Code: {}",
+                    location, c
+                )
             }
             ExecutionFailureStatus::VMVerificationOrDeserializationError => write!(
                 f,
@@ -1481,7 +1524,24 @@ impl Display for ExecutionFailureStatus {
             ExecutionFailureStatus::VMInvariantViolation => {
                 write!(f, "MOVE VM INVARIANT VIOLATION.")
             }
+            ExecutionFailureStatus::InvalidCoinMetadataObject => {
+                write!(f, "Invalid CoinMetadata type")
+            }
         }
+    }
+}
+
+impl Display for MoveLocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            module,
+            function,
+            instruction,
+        } = self;
+        write!(
+            f,
+            "{module} in function definition {function} at offset {instruction}"
+        )
     }
 }
 
@@ -1506,7 +1566,7 @@ impl Display for EntryArgumentErrorKind {
                 )
             }
             EntryArgumentErrorKind::ObjectKindMismatch => {
-                write!(f, "Mismtach with object argument kind and its actual kind.")
+                write!(f, "Mismatch with object argument kind and its actual kind.")
             }
             EntryArgumentErrorKind::UnsupportedPureArg => write!(
                 f,
@@ -1516,9 +1576,38 @@ impl Display for EntryArgumentErrorKind {
             EntryArgumentErrorKind::ArityMismatch => {
                 write!(
                     f,
-                    "Mismatch between the number of actual versus expected argument."
+                    "Mismatch between the number of actual versus expected arguments."
                 )
             }
+        }
+    }
+}
+
+impl Display for EntryTypeArgumentError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let EntryTypeArgumentError { argument_idx, kind } = self;
+        write!(f, "Error for type argument at index {argument_idx}: {kind}",)
+    }
+}
+
+impl Display for EntryTypeArgumentErrorKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EntryTypeArgumentErrorKind::ModuleNotFound => write!(
+                f,
+                "A package (or module) in the type argument was not found"
+            ),
+            EntryTypeArgumentErrorKind::TypeNotFound => {
+                write!(f, "A type was not found in the module specified",)
+            }
+            EntryTypeArgumentErrorKind::ArityMismatch => write!(
+                f,
+                "Mismatch between the number of actual versus expected type arguments."
+            ),
+            EntryTypeArgumentErrorKind::ConstraintNotSatisfied => write!(
+                f,
+                "A type provided did not match the specified constraints."
+            ),
         }
     }
 }
@@ -1590,6 +1679,12 @@ impl ExecutionStatus {
 impl From<EntryArgumentError> for ExecutionFailureStatus {
     fn from(error: EntryArgumentError) -> Self {
         Self::EntryArgumentError(error)
+    }
+}
+
+impl From<EntryTypeArgumentError> for ExecutionFailureStatus {
+    fn from(error: EntryTypeArgumentError) -> Self {
+        Self::EntryTypeArgumentError(error)
     }
 }
 
@@ -1674,24 +1769,41 @@ impl TransactionEffects {
     pub fn gas_cost_summary(&self) -> &GasCostSummary {
         &self.gas_used
     }
+}
 
-    pub fn to_sign_effects(
-        self,
-        epoch: EpochId,
-        authority_name: &AuthorityName,
-        secret: &dyn signature::Signer<AuthoritySignature>,
-    ) -> SignedTransactionEffects {
-        let transaction_effects_digest = OnceCell::from(self.digest());
-        let auth_signature = AuthoritySignInfo::new(epoch, &self, *authority_name, secret);
-        SignedTransactionEffects {
-            transaction_effects_digest,
-            effects: self,
-            auth_signature,
-        }
+impl Message for TransactionEffectsDigest {
+    type DigestType = TransactionEffectsDigest;
+
+    fn digest(&self) -> Self::DigestType {
+        *self
     }
 
-    pub fn digest(&self) -> TransactionEffectsDigest {
+    fn verify(&self) -> SuiResult {
+        Ok(())
+    }
+}
+
+impl Message for ExecutionDigests {
+    type DigestType = TransactionDigest;
+
+    fn digest(&self) -> Self::DigestType {
+        self.transaction
+    }
+
+    fn verify(&self) -> SuiResult {
+        Ok(())
+    }
+}
+
+impl Message for TransactionEffects {
+    type DigestType = TransactionEffectsDigest;
+
+    fn digest(&self) -> Self::DigestType {
         TransactionEffectsDigest(sha3_hash(self))
+    }
+
+    fn verify(&self) -> SuiResult {
+        Ok(())
     }
 }
 
@@ -1750,11 +1862,7 @@ impl Default for TransactionEffects {
             deleted: Vec::new(),
             wrapped: Vec::new(),
             gas_object: (
-                (
-                    ObjectID::random(),
-                    SequenceNumber::new(),
-                    ObjectDigest::new([0; 32]),
-                ),
+                random_object_ref(),
                 Owner::AddressOwner(SuiAddress::default()),
             ),
             events: Vec::new(),
@@ -1763,62 +1871,19 @@ impl Default for TransactionEffects {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TransactionEffectsEnvelope<S> {
-    // This is a cache of an otherwise expensive to compute value.
-    // DO NOT serialize or deserialize from the network or disk.
-    #[serde(skip)]
-    transaction_effects_digest: OnceCell<TransactionEffectsDigest>,
-
-    pub effects: TransactionEffects,
-    pub auth_signature: S,
-}
-
-impl<S> TransactionEffectsEnvelope<S> {
-    pub fn digest(&self) -> &TransactionEffectsDigest {
-        self.transaction_effects_digest
-            .get_or_init(|| self.effects.digest())
-    }
-}
-
+pub type TransactionEffectsEnvelope<S> = Envelope<TransactionEffects, S>;
 pub type UnsignedTransactionEffects = TransactionEffectsEnvelope<EmptySignInfo>;
 pub type SignedTransactionEffects = TransactionEffectsEnvelope<AuthoritySignInfo>;
-
-impl SignedTransactionEffects {
-    pub fn verify(&self, committee: &Committee) -> SuiResult {
-        self.auth_signature.verify(&self.effects, committee)
-    }
-}
-
-impl PartialEq for SignedTransactionEffects {
-    fn eq(&self, other: &Self) -> bool {
-        self.effects == other.effects && self.auth_signature == other.auth_signature
-    }
-}
-
 pub type CertifiedTransactionEffects = TransactionEffectsEnvelope<AuthorityStrongQuorumSignInfo>;
 
-impl CertifiedTransactionEffects {
-    pub fn new(
-        effects: TransactionEffects,
-        signatures: Vec<AuthoritySignInfo>,
-        committee: &Committee,
-    ) -> SuiResult<Self> {
-        Ok(Self {
-            transaction_effects_digest: OnceCell::from(effects.digest()),
-            effects,
-            auth_signature: AuthorityStrongQuorumSignInfo::new_from_auth_sign_infos(
-                signatures, committee,
-            )?,
-        })
-    }
+pub type ValidExecutionDigests = Envelope<ExecutionDigests, CertificateProof>;
+pub type ValidTransactionEffectsDigest = Envelope<TransactionEffectsDigest, CertificateProof>;
+pub type ValidTransactionEffects = TransactionEffectsEnvelope<CertificateProof>;
 
-    pub fn to_unsigned_effects(self) -> UnsignedTransactionEffects {
-        UnsignedTransactionEffects {
-            transaction_effects_digest: self.transaction_effects_digest,
-            effects: self.effects,
-            auth_signature: EmptySignInfo {},
-        }
+impl From<ValidExecutionDigests> for ValidTransactionEffectsDigest {
+    fn from(ved: ValidExecutionDigests) -> ValidTransactionEffectsDigest {
+        let (data, validity) = ved.into_data_and_sig();
+        ValidTransactionEffectsDigest::new(data.effects, validity)
     }
 }
 
@@ -1994,10 +2059,18 @@ pub struct ConsensusTransaction {
     pub kind: ConsensusTransactionKind,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum ConsensusTransactionKey {
+    Certificate(TransactionDigest),
+    CheckpointSignature(AuthorityName, CheckpointSequenceNumber),
+    EndOfPublish(AuthorityName),
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ConsensusTransactionKind {
     UserTransaction(Box<CertifiedTransaction>),
-    Checkpoint(Box<SignedCheckpointFragmentMessage>),
+    CheckpointSignature(Box<CheckpointSignatureMessage>),
+    EndOfPublish(AuthorityName),
 }
 
 impl ConsensusTransaction {
@@ -2009,20 +2082,30 @@ impl ConsensusTransaction {
         let tx_digest = certificate.digest();
         tx_digest.hash(&mut hasher);
         authority.hash(&mut hasher);
-        let tracking_id = hasher.finish().to_be_bytes();
+        let tracking_id = hasher.finish().to_le_bytes();
         Self {
             tracking_id,
             kind: ConsensusTransactionKind::UserTransaction(Box::new(certificate)),
         }
     }
 
-    pub fn new_checkpoint_message(fragment: SignedCheckpointFragmentMessage) -> Self {
+    pub fn new_checkpoint_signature_message(data: CheckpointSignatureMessage) -> Self {
         let mut hasher = DefaultHasher::new();
-        fragment.hash(&mut hasher);
-        let tracking_id = hasher.finish().to_be_bytes();
+        data.summary.auth_signature.signature.hash(&mut hasher);
+        let tracking_id = hasher.finish().to_le_bytes();
         Self {
             tracking_id,
-            kind: ConsensusTransactionKind::Checkpoint(Box::new(fragment)),
+            kind: ConsensusTransactionKind::CheckpointSignature(Box::new(data)),
+        }
+    }
+
+    pub fn new_end_of_publish(authority: AuthorityName) -> Self {
+        let mut hasher = DefaultHasher::new();
+        authority.hash(&mut hasher);
+        let tracking_id = hasher.finish().to_le_bytes();
+        Self {
+            tracking_id,
+            kind: ConsensusTransactionKind::EndOfPublish(authority),
         }
     }
 
@@ -2037,8 +2120,34 @@ impl ConsensusTransaction {
             ConsensusTransactionKind::UserTransaction(certificate) => {
                 certificate.verify_signature(committee)
             }
-            ConsensusTransactionKind::Checkpoint(fragment) => fragment.verify(),
+            ConsensusTransactionKind::CheckpointSignature(data) => data.verify(committee),
+            ConsensusTransactionKind::EndOfPublish(_) => Ok(()),
         }
+    }
+
+    pub fn key(&self) -> ConsensusTransactionKey {
+        match &self.kind {
+            ConsensusTransactionKind::UserTransaction(cert) => {
+                ConsensusTransactionKey::Certificate(*cert.digest())
+            }
+            ConsensusTransactionKind::CheckpointSignature(data) => {
+                ConsensusTransactionKey::CheckpointSignature(
+                    data.summary.auth_signature.authority,
+                    data.summary.summary.sequence_number,
+                )
+            }
+            ConsensusTransactionKind::EndOfPublish(authority) => {
+                ConsensusTransactionKey::EndOfPublish(*authority)
+            }
+        }
+    }
+
+    pub fn is_user_certificate(&self) -> bool {
+        matches!(self.kind, ConsensusTransactionKind::UserTransaction(_))
+    }
+
+    pub fn is_end_of_publish(&self) -> bool {
+        matches!(self.kind, ConsensusTransactionKind::EndOfPublish(_))
     }
 }
 

@@ -883,7 +883,7 @@ impl QueryableExporter {
 
         let mut shared_object_refs = vec![];
 
-        for object in &effects.effects.shared_objects {
+        for object in &effects.shared_objects {
             shared_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -892,7 +892,7 @@ impl QueryableExporter {
 
         let mut created_object_refs = vec![];
 
-        for object in &effects.effects.created {
+        for object in &effects.created {
             created_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -903,7 +903,7 @@ impl QueryableExporter {
 
         let mut mutated_object_refs = vec![];
 
-        for object in &effects.effects.mutated {
+        for object in &effects.mutated {
             mutated_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -914,7 +914,7 @@ impl QueryableExporter {
 
         let mut deleted_object_refs = vec![];
 
-        for object in &effects.effects.deleted {
+        for object in &effects.deleted {
             deleted_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -925,7 +925,7 @@ impl QueryableExporter {
 
         let mut unwrapped_object_refs = vec![];
 
-        for object in &effects.effects.unwrapped {
+        for object in &effects.unwrapped {
             unwrapped_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -936,7 +936,7 @@ impl QueryableExporter {
 
         let mut wrapped_object_refs = vec![];
 
-        for object in &effects.effects.wrapped {
+        for object in &effects.wrapped {
             wrapped_object_refs.push(Some(bcs::to_bytes(object)?));
         }
 
@@ -958,29 +958,28 @@ impl QueryableExporter {
 
         transaction_writer.add_value_u64(
             String::from("gas_used"),
-            Some(effects.effects.gas_used.gas_used()),
+            Some(effects.gas_used.gas_used()),
         )?;
 
         transaction_writer.add_value_u64(
             String::from("gas_computation_cost"),
-            Some(effects.effects.gas_cost_summary().computation_cost),
+            Some(effects.gas_cost_summary().computation_cost),
         )?;
 
         transaction_writer.add_value_u64(
             String::from("gas_storage_cost"),
-            Some(effects.effects.gas_cost_summary().storage_cost),
+            Some(effects.gas_cost_summary().storage_cost),
         )?;
 
         transaction_writer.add_value_u64(
             String::from("gas_storage_rebate"),
-            Some(effects.effects.gas_cost_summary().storage_rebate),
+            Some(effects.gas_cost_summary().storage_rebate),
         )?;
 
         transaction_writer.add_list_value_binary(
             String::from("dependencies"),
             Some(
                 effects
-                    .effects
                     .dependencies
                     .iter()
                     .map(|dependency| Some(dependency.to_bytes()))
@@ -1096,18 +1095,18 @@ impl QueryableExporter {
 
         transaction_writer.add_value_bool(
             String::from("success"),
-            Some(effects.effects.status.is_ok()),
+            Some(effects.status.is_ok()),
         )?;
         transaction_writer.add_value_binary(
             String::from("detailed_status"),
-            Some(serde_json::to_vec(&effects.effects.status)?),
+            Some(serde_json::to_vec(&effects.status)?),
         )?;
 
         transaction_writer.add_value_u64(String::from("time"), Some(timestamp_ms))?;
 
         transaction_writer.add_value_u64(
             String::from("fee"),
-            Some(effects.effects.gas_used.gas_used() * cert.data().data.gas_price),
+            Some(effects.gas_used.gas_used() * cert.data().data.gas_price),
         )?;
 
         transaction_writer.add_value_u32(
@@ -1124,10 +1123,10 @@ impl QueryableExporter {
         for (j, move_struct) in event_move_structs
             .iter()
             .enumerate()
-            .take(effects.effects.events.len())
+            .take(effects.events.len())
         {
             let tx_event_id = j as u32;
-            let event = &effects.effects.events[j];
+            let event = &effects.events[j];
 
             let event_id = datasource_writer.get_next_id(String::from(ENTITY_EVENTS_NAME))?;
 

@@ -9,24 +9,19 @@ use fastcrypto::traits::AggregateAuthenticator;
 use fastcrypto::traits::KeyPair;
 use roaring::RoaringBitmap;
 
+use crate::base_types::random_object_ref;
 use crate::crypto::bcs_signable_test::{get_obligation_input, Foo};
 use crate::crypto::Secp256k1SuiSignature;
 use crate::crypto::SuiKeyPair;
 use crate::crypto::{
-    get_key_pair, AccountKeyPair, AuthorityKeyPair, AuthorityPublicKeyBytes, SuiAuthoritySignature,
+    get_key_pair, AccountKeyPair, AuthorityKeyPair, AuthorityPublicKeyBytes,
+    AuthoritySignInfoTrait, SuiAuthoritySignature,
 };
 use crate::messages_checkpoint::CheckpointContents;
 use crate::messages_checkpoint::CheckpointSummary;
 use crate::object::Owner;
 
 use super::*;
-fn random_object_ref() -> ObjectRef {
-    (
-        ObjectID::random(),
-        SequenceNumber::new(),
-        ObjectDigest::new([0; 32]),
-    )
-}
 
 #[test]
 fn test_signed_values() {
@@ -238,7 +233,7 @@ fn test_handle_reject_malicious_signature() {
         AuthorityStrongQuorumSignInfo::new_from_auth_sign_infos(signatures, &committee).unwrap();
     {
         let (_, sec): (_, AuthorityKeyPair) = get_key_pair();
-        let sig = AuthoritySignature::new(&message, &sec);
+        let sig = AuthoritySignature::new(&message, committee.epoch, &sec);
         quorum.signature.add_signature(sig).unwrap();
     }
     let (mut obligation, idx) = get_obligation_input(&message);
@@ -246,6 +241,45 @@ fn test_handle_reject_malicious_signature() {
         .add_to_verification_obligation(&committee, &mut obligation, idx)
         .is_ok());
     assert!(obligation.verify_all().is_err());
+}
+
+#[test]
+fn test_auth_sig_commit_to_wrong_epoch_id_fail() {
+    let message: Foo = Foo("some data".to_string());
+    let mut signatures: Vec<AuthoritySignInfo> = Vec::new();
+    let mut authorities: BTreeMap<AuthorityPublicKeyBytes, u64> = BTreeMap::new();
+
+    for _ in 0..5 {
+        let (_, sec): (_, AuthorityKeyPair) = get_key_pair();
+        let name = AuthorityPublicKeyBytes::from(sec.public());
+        authorities.insert(name, 1);
+        signatures.push(AuthoritySignInfo::new(
+            1,
+            &Foo("some data".to_string()),
+            name,
+            &sec,
+        ));
+    }
+    // committee set up with epoch 1
+    let committee = Committee::new(1, authorities.clone()).unwrap();
+    let mut quorum =
+        AuthorityStrongQuorumSignInfo::new_from_auth_sign_infos(signatures, &committee).unwrap();
+    {
+        let (_, sec): (_, AuthorityKeyPair) = get_key_pair();
+        // signature commits to epoch 0
+        let sig = AuthoritySignature::new(&message, 1, &sec);
+        quorum.signature.add_signature(sig).unwrap();
+    }
+    let (mut obligation, idx) = get_obligation_input(&message);
+    assert!(quorum
+        .add_to_verification_obligation(&committee, &mut obligation, idx)
+        .is_ok());
+    assert_eq!(
+        obligation.verify_all(),
+        Err(SuiError::InvalidSignature {
+            error: "General cryptographic error".to_string()
+        })
+    );
 }
 
 #[test]
@@ -431,14 +465,18 @@ fn test_digest_caching() {
         ..Default::default()
     };
 
-    let mut signed_effects = effects.to_sign_effects(
+    let mut signed_effects = SignedTransactionEffects::new(
         committee.epoch(),
-        &AuthorityPublicKeyBytes::from(sec1.public()),
+        effects,
         &sec1,
+        AuthorityPublicKeyBytes::from(sec1.public()),
     );
 
     let initial_effects_digest = *signed_effects.digest();
-    signed_effects.effects.gas_used.computation_cost += 1;
+    signed_effects
+        .data_mut_for_testing()
+        .gas_used
+        .computation_cost += 1;
 
     // digest is cached
     assert_eq!(initial_effects_digest, *signed_effects.digest());

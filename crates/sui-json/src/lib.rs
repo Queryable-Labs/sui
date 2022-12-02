@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{anyhow, bail};
+use fastcrypto::encoding::{Encoding, Hex};
 use move_binary_format::{
     access::ModuleAccess, binary_views::BinaryIndexedView, file_format::SignatureToken,
 };
@@ -17,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Number, Value as JsonValue};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug, Formatter};
-use sui_types::base_types::{decode_bytes_hex, ObjectID, SuiAddress};
+use std::str::FromStr;
+use sui_types::base_types::{ObjectID, SuiAddress};
 use sui_types::move_package::MovePackage;
 use sui_verifier::entry_points_verifier::{
     is_tx_context, RESOLVED_ASCII_STR, RESOLVED_STD_OPTION, RESOLVED_SUI_ID, RESOLVED_UTF8_STR,
@@ -218,7 +220,7 @@ impl SuiJsonValue {
                         // Move call
                         let vec = if s.starts_with(HEX_PREFIX) {
                             // If starts with 0x, treat as hex vector
-                            hex::decode(s.trim_start_matches(HEX_PREFIX))?
+                            Hex::decode(s).map_err(|e| anyhow!(e))?
                         } else {
                             // Else raw bytes
                             s.as_bytes().to_vec()
@@ -247,7 +249,7 @@ impl SuiJsonValue {
                 if !s.starts_with(HEX_PREFIX) {
                     bail!("Address hex string must start with 0x.",);
                 }
-                let r: SuiAddress = decode_bytes_hex(&s)?;
+                let r = SuiAddress::from_str(&s)?;
                 MoveValue::Address(r.into())
             }
             _ => bail!("Unexpected arg {val} for expected type {ty}"),
@@ -335,9 +337,7 @@ fn check_valid_homogeneous_rec(curr_q: &mut VecDeque<&JsonValue>) -> Result<(), 
     let mut level_type = ValidJsonType::Any;
 
     // Process all in this queue/level
-    while !curr_q.is_empty() {
-        // Okay to unwrap since we know values exist
-        let v = curr_q.pop_front().unwrap();
+    while let Some(v) = curr_q.pop_front() {
         let curr = match v {
             JsonValue::Bool(_) => ValidJsonType::Bool,
             JsonValue::Number(x) if x.is_u64() => ValidJsonType::Number,
@@ -634,7 +634,7 @@ pub fn resolve_move_function_args(
 
     if !fdef.is_entry {
         bail!(
-            "{}::{} does not have public(script) visibility",
+            "{}::{} is not an entry function",
             module.self_id(),
             function,
         )

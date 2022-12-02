@@ -14,6 +14,7 @@ use test_utils::CommitteeFixture;
 #[allow(unused_imports)]
 use tokio::sync::mpsc::channel;
 use tokio::sync::watch;
+use tracing::info;
 use types::ReconfigureNotification;
 
 // Run for 4 dag rounds in ideal conditions (all nodes reference all other nodes). We should commit
@@ -43,6 +44,7 @@ async fn commit_one() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -60,6 +62,7 @@ async fn commit_one() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -75,11 +78,13 @@ async fn commit_one() {
 
     // Ensure the first 4 ordered certificates are from round 1 (they are the parents of the committed
     // leader); then the leader's certificate should be committed.
+    let committed_sub_dag = rx_output.recv().await.unwrap();
+    let mut sequence = committed_sub_dag.certificates.into_iter();
     for _ in 1..=4 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 1);
     }
-    let output = rx_output.recv().await.unwrap();
+    let output = sequence.next().unwrap();
     assert_eq!(output.certificate.round(), 2);
 }
 
@@ -106,6 +111,7 @@ async fn dead_node() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -123,6 +129,7 @@ async fn dead_node() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -138,12 +145,19 @@ async fn dead_node() {
     });
 
     // We should commit 4 leaders (rounds 2, 4, 6, and 8).
+    let mut committed = Vec::new();
+    for _commit_rounds in 1..=4 {
+        let committed_sub_dag = rx_output.recv().await.unwrap();
+        committed.extend(committed_sub_dag.certificates);
+    }
+
+    let mut sequence = committed.into_iter();
     for i in 1..=21 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         let expected = ((i - 1) / keys.len() as u64) + 1;
         assert_eq!(output.certificate.round(), expected);
     }
-    let output = rx_output.recv().await.unwrap();
+    let output = sequence.next().unwrap();
     assert_eq!(output.certificate.round(), 8);
 }
 
@@ -219,6 +233,7 @@ async fn not_enough_support() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -236,6 +251,7 @@ async fn not_enough_support() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -250,19 +266,26 @@ async fn not_enough_support() {
     }
 
     // We should commit 2 leaders (rounds 2 and 4).
+    let committed_sub_dag = rx_output.recv().await.unwrap();
+    let mut sequence = committed_sub_dag.certificates.into_iter();
     for _ in 1..=3 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 1);
     }
-    for _ in 1..=4 {
-        let output = rx_output.recv().await.unwrap();
+    let output = sequence.next().unwrap();
+    assert_eq!(output.certificate.round(), 2);
+
+    let committed_sub_dag = rx_output.recv().await.unwrap();
+    let mut sequence = committed_sub_dag.certificates.into_iter();
+    for _ in 1..=3 {
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 2);
     }
     for _ in 1..=3 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 3);
     }
-    let output = rx_output.recv().await.unwrap();
+    let output = sequence.next().unwrap();
     assert_eq!(output.certificate.round(), 4);
 }
 
@@ -302,6 +325,7 @@ async fn missing_leader() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (_tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -319,6 +343,7 @@ async fn missing_leader() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -333,19 +358,21 @@ async fn missing_leader() {
     }
 
     // Ensure the commit sequence is as expected.
+    let committed_sub_dag = rx_output.recv().await.unwrap();
+    let mut sequence = committed_sub_dag.certificates.into_iter();
     for _ in 1..=3 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 1);
     }
     for _ in 1..=3 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 2);
     }
     for _ in 1..=4 {
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.round(), 3);
     }
-    let output = rx_output.recv().await.unwrap();
+    let output = sequence.next().unwrap();
     assert_eq!(output.certificate.round(), 4);
 }
 
@@ -361,6 +388,7 @@ async fn epoch_change() {
     let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
     let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+    let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
     let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
     let (tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -378,6 +406,7 @@ async fn epoch_change() {
         rx_reconfigure,
         rx_waiter,
         tx_primary,
+        tx_consensus_round_updates,
         tx_output,
         bullshark,
         metrics,
@@ -421,12 +450,14 @@ async fn epoch_change() {
 
         // Ensure the first 4 ordered certificates are from round 1 (they are the parents of the committed
         // leader); then the leader's certificate should be committed.
+        let committed_sub_dag = rx_output.recv().await.unwrap();
+        let mut sequence = committed_sub_dag.certificates.into_iter();
         for _ in 1..=4 {
-            let output = rx_output.recv().await.unwrap();
+            let output = sequence.next().unwrap();
             assert_eq!(output.certificate.epoch(), epoch);
             assert_eq!(output.certificate.round(), 1);
         }
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.epoch(), epoch);
         assert_eq!(output.certificate.round(), 2);
 
@@ -437,8 +468,100 @@ async fn epoch_change() {
     }
 }
 
+// Run for 11 dag rounds in ideal conditions (all nodes reference all other nodes).
+// Every two rounds (on odd rounds), restart consensus and check consistency.
+#[tokio::test]
+async fn committed_round_after_restart() {
+    let fixture = CommitteeFixture::builder().build();
+    let committee = fixture.committee();
+    let keys: Vec<_> = fixture.authorities().map(|a| a.public_key()).collect();
+    let epoch = committee.epoch();
+
+    // Make certificates for rounds 1 to 11.
+    let genesis = Certificate::genesis(&committee)
+        .iter()
+        .map(|x| x.digest())
+        .collect::<BTreeSet<_>>();
+    let (certificates, _) =
+        test_utils::make_certificates_with_epoch(&committee, 1..=11, epoch, &genesis, &keys);
+
+    let store = make_consensus_store(&test_utils::temp_dir());
+    let cert_store = make_certificate_store(&test_utils::temp_dir());
+
+    for input_round in (1..=11usize).step_by(2) {
+        // Spawn consensus and create related channels.
+        let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
+        let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
+        let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+        let (tx_consensus_round_updates, rx_consensus_round_updates) = watch::channel(0);
+
+        let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
+        let (tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
+        let gc_depth = 50;
+        let metrics = Arc::new(ConsensusMetrics::new(&Registry::new()));
+        let bullshark = Bullshark::new(committee.clone(), store.clone(), gc_depth, metrics.clone());
+
+        let handle = Consensus::spawn(
+            committee.clone(),
+            store.clone(),
+            cert_store.clone(),
+            rx_reconfigure,
+            rx_waiter,
+            tx_primary,
+            tx_consensus_round_updates,
+            tx_output,
+            bullshark,
+            metrics.clone(),
+            gc_depth,
+        );
+
+        // When `input_round` is 2 * r + 1, r > 1, the previous commit round would be 2 * (r - 1),
+        // and the expected commit round after sending in certificates up to `input_round` would
+        // be 2 * r.
+
+        let last_committed_round = rx_consensus_round_updates.borrow().to_owned() as usize;
+        assert_eq!(last_committed_round, input_round.saturating_sub(3),);
+        info!("Consensus started at last_committed_round={last_committed_round}");
+
+        // Feed certificates from two rounds into consensus.
+        let start_index = input_round.saturating_sub(2) * committee.size();
+        let end_index = input_round * committee.size();
+        for cert in certificates.iter().take(end_index).skip(start_index) {
+            tx_waiter.send(cert.clone()).await.unwrap();
+        }
+        info!("Sent certificates {start_index} ~ {end_index} to consensus");
+
+        // There should only be one new item in the output streams.
+        if input_round > 1 {
+            let committed = rx_output.recv().await.unwrap();
+            info!(
+                "Received output from consensus, committed_round={}",
+                committed.leader.round()
+            );
+            let (round, _certs) = rx_primary.recv().await.unwrap();
+            info!("Received committed certificates from consensus, committed_round={round}",);
+        }
+
+        // After sending inputs upt to round 2 * r + 1 to consensus, round 2 * r should have been
+        // committed.
+        assert_eq!(
+            rx_consensus_round_updates.borrow().to_owned() as usize,
+            input_round.saturating_sub(1),
+        );
+        info!(
+            "Committed round adanced to {}",
+            input_round.saturating_sub(1)
+        );
+
+        // Shutdown consensus and wait for it to stop.
+        let message = ReconfigureNotification::Shutdown;
+        tx_reconfigure.send(message).unwrap();
+        handle.await.unwrap();
+    }
+}
+
 // Run for 4 dag rounds in ideal conditions (all nodes reference all other nodes). We should commit
-// the leader of round 2. Then shutdown consensus and restart it in a
+// the leader of round 2. Then shutdown consensus and restart in a new epoch.
 #[tokio::test]
 async fn restart_with_new_committee() {
     let fixture = CommitteeFixture::builder().build();
@@ -451,6 +574,7 @@ async fn restart_with_new_committee() {
         let (tx_waiter, rx_waiter) = test_utils::test_channel!(1);
         let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
         let (tx_output, mut rx_output) = test_utils::test_channel!(1);
+        let (tx_consensus_round_updates, _rx_consensus_round_updates) = watch::channel(0);
 
         let initial_committee = ReconfigureNotification::NewEpoch(committee.clone());
         let (tx_reconfigure, rx_reconfigure) = watch::channel(initial_committee);
@@ -467,6 +591,7 @@ async fn restart_with_new_committee() {
             rx_reconfigure,
             rx_waiter,
             tx_primary,
+            tx_consensus_round_updates,
             tx_output,
             bullshark,
             metrics.clone(),
@@ -508,12 +633,14 @@ async fn restart_with_new_committee() {
 
         // Ensure the first 4 ordered certificates are from round 1 (they are the parents of the committed
         // leader); then the leader's certificate should be committed.
+        let committed_sub_dag = rx_output.recv().await.unwrap();
+        let mut sequence = committed_sub_dag.certificates.into_iter();
         for _ in 1..=4 {
-            let output = rx_output.recv().await.unwrap();
+            let output = sequence.next().unwrap();
             assert_eq!(output.certificate.epoch(), epoch);
             assert_eq!(output.certificate.round(), 1);
         }
-        let output = rx_output.recv().await.unwrap();
+        let output = sequence.next().unwrap();
         assert_eq!(output.certificate.epoch(), epoch);
         assert_eq!(output.certificate.round(), 2);
 

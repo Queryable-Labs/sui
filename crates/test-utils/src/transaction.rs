@@ -21,6 +21,7 @@ use sui_types::base_types::ObjectRef;
 use sui_types::base_types::{ObjectID, SuiAddress, TransactionDigest};
 use sui_types::committee::Committee;
 use sui_types::error::SuiResult;
+use sui_types::message_envelope::Message;
 use sui_types::messages::ExecuteTransactionRequestType;
 use sui_types::messages::{
     CallArg, ObjectArg, ObjectInfoRequest, ObjectInfoResponse, Transaction, TransactionData,
@@ -36,6 +37,8 @@ use crate::messages::{
     make_tx_certs_and_signed_effects_with_committee, MAX_GAS,
 };
 use crate::{test_account_keys, test_committee};
+
+const GAS_BUDGET: u64 = 5000;
 
 pub fn make_publish_package(gas_object: Object, path: PathBuf) -> VerifiedTransaction {
     let (sender, keypair) = test_account_keys().pop().unwrap();
@@ -82,14 +85,21 @@ pub fn compile_basics_package() -> Vec<Vec<u8>> {
 }
 
 /// Helper function to publish basic package.
-/// Returns the published package's ObjectRef.
 pub async fn publish_basics_package(context: &WalletContext, sender: SuiAddress) -> ObjectRef {
+    publish_package_with_wallet(context, sender, compile_basics_package()).await
+}
+
+/// Returns the published package's ObjectRef.
+pub async fn publish_package_with_wallet(
+    context: &WalletContext,
+    sender: SuiAddress,
+    all_module_bytes: Vec<Vec<u8>>,
+) -> ObjectRef {
     let transaction = {
-        let all_module_bytes = compile_basics_package();
         let data = context
             .client
             .transaction_builder()
-            .publish(sender, all_module_bytes, None, 50000)
+            .publish(sender, all_module_bytes, None, GAS_BUDGET)
             .await
             .unwrap();
 
@@ -145,7 +155,7 @@ pub async fn submit_move_transaction(
             vec![], // type_args
             arguments,
             gas_object,
-            50000,
+            GAS_BUDGET,
         )
         .await
         .unwrap();
@@ -233,7 +243,7 @@ pub async fn create_devnet_nft(
         description: Some("example_nft_desc".into()),
         url: Some("https://sui.io/_nuxt/img/sui-logo.8d3c44e.svg".into()),
         gas: Some(*gas_object),
-        gas_budget: Some(50000),
+        gas_budget: Some(GAS_BUDGET),
     }
     .execute(context)
     .await?;
@@ -271,7 +281,7 @@ pub async fn transfer_sui(
         to: receiver,
         amount: None,
         sui_coin_object_id: gas_ref.0,
-        gas_budget: 50000,
+        gas_budget: GAS_BUDGET,
     }
     .execute(context)
     .await?;
@@ -317,7 +327,7 @@ pub async fn transfer_coin(
         to: receiver,
         object_id: object_to_send,
         gas: None,
-        gas_budget: 50000,
+        gas_budget: GAS_BUDGET,
     }
     .execute(context)
     .await?;
@@ -477,7 +487,7 @@ pub async fn submit_shared_object_transaction_with_committee(
 pub fn get_unique_effects(replies: Vec<TransactionInfoResponse>) -> TransactionEffects {
     let mut all_effects = HashMap::new();
     for reply in replies {
-        let effects = reply.signed_effects.unwrap().effects;
+        let effects = reply.signed_effects.unwrap().into_data();
         all_effects.insert(effects.digest(), effects);
     }
     assert_eq!(all_effects.len(), 1);

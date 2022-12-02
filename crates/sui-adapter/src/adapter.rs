@@ -4,7 +4,6 @@
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
-    convert::TryFrom,
     fmt::Debug,
 };
 
@@ -14,8 +13,11 @@ use linked_hash_map::LinkedHashMap;
 use move_binary_format::{
     access::ModuleAccess,
     binary_views::BinaryIndexedView,
-    errors::VMResult,
-    file_format::{AbilitySet, CompiledModule, LocalIndex, SignatureToken, StructHandleIndex},
+    errors::{VMError, VMResult},
+    file_format::{
+        AbilitySet, CompiledModule, LocalIndex, SignatureToken, StructHandleIndex,
+        TypeParameterIndex,
+    },
 };
 use move_bytecode_verifier::VerifierConfig;
 use move_core_types::trace::CallTrace;
@@ -51,8 +53,6 @@ use sui_verifier::{
     verifier, INIT_FN_NAME,
 };
 use tracing::instrument;
-
-use crate::bytecode_rewriter::ModuleHandleRewriter;
 
 macro_rules! assert_invariant {
     ($cond:expr, $msg:expr) => {
@@ -207,6 +207,12 @@ fn execute_internal<
         .map(|(id, (owner, _))| (*id, (by_value_objects.contains(id), *owner)))
         .collect();
     let mut session = new_session(vm, state_view, input_objects);
+    // check type arguments separately for error conversion
+    for (idx, ty) in type_args.iter().enumerate() {
+        session
+            .load_type(ty)
+            .map_err(|e| convert_type_argument_error(idx, e))?;
+    }
     // script visibility checked manually for entry points
     let (
         SerializedReturnValues {
@@ -499,37 +505,33 @@ pub fn generate_package_id(
     modules: &mut [CompiledModule],
     ctx: &mut TxContext,
 ) -> Result<ObjectID, ExecutionError> {
-    let mut sub_map = BTreeMap::new();
     let package_id = ctx.fresh_id();
-    for module in modules.iter() {
-        let old_module_id = module.self_id();
-        let old_address = *old_module_id.address();
-        if old_address != AccountAddress::ZERO {
-            let handle = module.module_handle_at(module.self_module_handle_idx);
-            let name = module.identifier_at(handle.name);
+    let new_address = AccountAddress::from(package_id);
+
+    for module in modules.iter_mut() {
+        let self_handle = module.self_handle().clone();
+        let self_address_idx = self_handle.address;
+
+        let addrs = &mut module.address_identifiers;
+        let Some(address_mut) = addrs.get_mut(self_address_idx.0 as usize) else {
+            let name = module.identifier_at(self_handle.name);
+            return Err(ExecutionError::new_with_source(
+                ExecutionErrorKind::PublishErrorNonZeroAddress,
+                format!("Publishing module {name} with invalid address index"),
+            ));
+        };
+
+        if *address_mut != AccountAddress::ZERO {
+            let name = module.identifier_at(self_handle.name);
             return Err(ExecutionError::new_with_source(
                 ExecutionErrorKind::PublishErrorNonZeroAddress,
                 format!("Publishing module {name} with non-zero address is not allowed"),
             ));
-        }
-        let new_module_id = ModuleId::new(
-            AccountAddress::from(package_id),
-            old_module_id.name().to_owned(),
-        );
-        if sub_map.insert(old_module_id, new_module_id).is_some() {
-            return Err(ExecutionError::new_with_source(
-                ExecutionErrorKind::PublishErrorDuplicateModule,
-                "Publishing two modules with the same ID",
-            ));
-        }
+        };
+
+        *address_mut = new_address;
     }
 
-    // Safe to unwrap because we checked for duplicate domain entries above, and range entries are fresh ID's
-    let rewriter = ModuleHandleRewriter::new(sub_map).unwrap();
-    for module in modules.iter_mut() {
-        // rewrite module handles to reflect freshly generated ID's
-        rewriter.sub_module_ids(module);
-    }
     Ok(package_id)
 }
 
@@ -566,7 +568,7 @@ fn process_successful_execution<S: Storage + ParentSync>(
         obj.data
             .try_as_move_mut()
             .expect("We previously checked that mutable ref inputs are Move objects")
-            .update_contents_and_increment_version(new_contents);
+            .update_contents_and_increment_version(new_contents)?;
 
         changes.insert(
             obj_id,
@@ -579,8 +581,13 @@ fn process_successful_execution<S: Storage + ParentSync>(
         let has_public_transfer = abilities.has_store();
         debug_assert_eq!(
             id,
-            ObjectID::try_from(&contents[0..ID_END_INDEX])
-                .expect("object contents should start with an id")
+            ObjectID::from_bytes(contents.get(0..ID_END_INDEX).ok_or_else(|| {
+                ExecutionError::new_with_source(
+                    ExecutionErrorKind::InvariantViolation,
+                    "Cannot parse Object ID",
+                )
+            })?)
+            .expect("object contents should start with an id")
         );
         let old_object_opt = by_value_objects.get(&id);
         let loaded_child_version_opt = loaded_child_objects.get(&id);
@@ -623,7 +630,7 @@ fn process_successful_execution<S: Storage + ParentSync>(
         };
         // safe because `has_public_transfer` was properly determined from the abilities
         let mut move_obj =
-            unsafe { MoveObject::new_from_execution(tag, has_public_transfer, version, contents) };
+            unsafe { MoveObject::new_from_execution(tag, has_public_transfer, version, contents)? };
 
         #[cfg(debug_assertions)]
         {
@@ -1380,4 +1387,17 @@ fn missing_unwrapped_msg(id: &ObjectID) -> String {
         "Unable to unwrap object {}. Was unable to retrieve last known version in the parent sync",
         id
     )
+}
+
+fn convert_type_argument_error(idx: usize, error: VMError) -> ExecutionError {
+    use move_core_types::vm_status::StatusCode;
+    use sui_types::messages::EntryTypeArgumentErrorKind;
+    let kind = match error.major_status() {
+        StatusCode::LINKER_ERROR => EntryTypeArgumentErrorKind::ModuleNotFound,
+        StatusCode::TYPE_RESOLUTION_FAILURE => EntryTypeArgumentErrorKind::TypeNotFound,
+        StatusCode::NUMBER_OF_TYPE_ARGUMENTS_MISMATCH => EntryTypeArgumentErrorKind::ArityMismatch,
+        StatusCode::CONSTRAINT_NOT_SATISFIED => EntryTypeArgumentErrorKind::ConstraintNotSatisfied,
+        _ => return error.into(),
+    };
+    ExecutionErrorKind::entry_type_argument_error(idx as TypeParameterIndex, kind).into()
 }

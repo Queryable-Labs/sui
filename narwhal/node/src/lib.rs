@@ -5,13 +5,12 @@ use consensus::{
     bullshark::Bullshark,
     dag::Dag,
     metrics::{ChannelMetrics, ConsensusMetrics},
-    Consensus, ConsensusOutput,
+    Consensus,
 };
 
 use crypto::{KeyPair, NetworkKeyPair, PublicKey};
 use executor::{get_restored_consensus_output, ExecutionState, Executor, SubscriberResult};
 use fastcrypto::traits::{KeyPair as _, VerifyingKey};
-use itertools::Itertools;
 use network::P2pNetwork;
 use primary::{NetworkModel, Primary, PrimaryChannelMetrics};
 use prometheus::{IntGauge, Registry};
@@ -21,7 +20,7 @@ use tokio::sync::oneshot;
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::{debug, info};
 use types::{metered_channel, Certificate, ReconfigureNotification, Round};
-use worker::{metrics::initialise_metrics, Worker};
+use worker::{metrics::initialise_metrics, TransactionValidator, Worker};
 
 pub mod execution_state;
 pub mod metrics;
@@ -86,7 +85,8 @@ impl Node {
         // Compute the public key of this authority.
         let name = keypair.public().clone();
         let mut handles = Vec::new();
-        let (rx_executor_network, tx_executor_network) = oneshot::channel();
+        let (tx_executor_network, rx_executor_network) = oneshot::channel();
+        let (tx_consensus_round_updates, rx_consensus_round_updates) = watch::channel(0u64);
         let (dag, network_model) = if !internal_consensus {
             debug!("Consensus is disabled: the primary will run w/o Bullshark");
             let consensus_metrics = Arc::new(ConsensusMetrics::new(registry));
@@ -98,7 +98,7 @@ impl Node {
         } else {
             let consensus_handles = Self::spawn_consensus(
                 name.clone(),
-                tx_executor_network,
+                rx_executor_network,
                 worker_cache.clone(),
                 committee.clone(),
                 store,
@@ -107,11 +107,13 @@ impl Node {
                 &tx_reconfigure,
                 rx_new_certificates,
                 tx_committed_certificates.clone(),
+                tx_consensus_round_updates,
                 registry,
             )
             .await?;
 
             handles.extend(consensus_handles);
+
             (None, NetworkModel::PartiallySynchronous)
         };
 
@@ -145,12 +147,13 @@ impl Node {
             store.vote_digest_store.clone(),
             tx_new_certificates,
             rx_committed_certificates,
+            rx_consensus_round_updates,
             dag,
             network_model,
             tx_reconfigure,
             tx_committed_certificates,
             registry,
-            Some(rx_executor_network),
+            Some(tx_executor_network),
         );
         handles.extend(primary_handles);
 
@@ -177,7 +180,7 @@ impl Node {
     /// Spawn the consensus core and the client executing transactions.
     async fn spawn_consensus<State>(
         name: PublicKey,
-        network: oneshot::Receiver<P2pNetwork>,
+        rx_executor_network: oneshot::Receiver<P2pNetwork>,
         worker_cache: SharedWorkerCache,
         committee: SharedCommittee,
         store: &NodeStorage,
@@ -186,6 +189,7 @@ impl Node {
         tx_reconfigure: &watch::Sender<ReconfigureNotification>,
         rx_new_certificates: metered_channel::Receiver<Certificate>,
         tx_committed_certificates: metered_channel::Sender<(Round, Vec<Certificate>)>,
+        tx_consensus_round_updates: watch::Sender<Round>,
         registry: &Registry,
     ) -> SubscriberResult<Vec<JoinHandle<()>>>
     where
@@ -204,21 +208,18 @@ impl Node {
             store.certificate_store.clone(),
             &execution_state,
         )
-        .await?
-        .into_iter()
-        .sorted_by(|a, b| a.consensus_index.cmp(&b.consensus_index))
-        .collect::<Vec<ConsensusOutput>>();
+        .await?;
 
-        let len_restored = restored_consensus_output.len() as u64;
-        if len_restored > 0 {
+        let num_leaders = restored_consensus_output.len() as u64;
+        let num_certificates: usize = restored_consensus_output.iter().map(|x| x.len()).sum();
+        if num_leaders > 0 {
             info!(
-                "Consensus output on its way to the executor was restored for {} certificates",
-                len_restored
+                "Consensus output on its way to the executor was restored for {num_leaders} leaders and {num_certificates} certificates",
             );
         }
         consensus_metrics
             .recovered_consensus_output
-            .inc_by(len_restored);
+            .inc_by(num_certificates as u64);
 
         // Spawn the consensus core who only sequences transactions.
         let ordering_engine = Bullshark::new(
@@ -234,6 +235,7 @@ impl Node {
             tx_reconfigure.subscribe(),
             rx_new_certificates,
             tx_committed_certificates,
+            tx_consensus_round_updates,
             tx_sequence,
             ordering_engine,
             consensus_metrics.clone(),
@@ -244,7 +246,7 @@ impl Node {
         // subscriber handler if it missed some transactions.
         let executor_handles = Executor::spawn(
             name,
-            network,
+            rx_executor_network,
             worker_cache,
             (**committee.load()).clone(),
             execution_state,
@@ -274,6 +276,8 @@ impl Node {
         store: &NodeStorage,
         // The configuration parameters.
         parameters: Parameters,
+        // The transaction validator defining Tx acceptance,
+        tx_validator: impl TransactionValidator,
         // The prometheus metrics Registry
         registry: &Registry,
     ) -> Vec<JoinHandle<()>> {
@@ -289,6 +293,7 @@ impl Node {
                 committee.clone(),
                 worker_cache.clone(),
                 parameters.clone(),
+                tx_validator.clone(),
                 store.batch_store.clone(),
                 metrics.clone(),
             );

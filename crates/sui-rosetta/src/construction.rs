@@ -4,12 +4,10 @@
 use std::sync::Arc;
 
 use axum::{Extension, Json};
-use fastcrypto::encoding::Hex;
-
-use sui_types::base_types::{encode_bytes_hex, SuiAddress};
+use fastcrypto::encoding::{Encoding, Hex};
+use sui_types::base_types::SuiAddress;
 use sui_types::crypto;
 use sui_types::crypto::{SignableBytes, SignatureScheme, ToFromBytes};
-use sui_types::gas_coin::GasCoin;
 use sui_types::messages::{
     QuorumDriverRequest, QuorumDriverRequestType, QuorumDriverResponse, SenderSignedData,
     Transaction, TransactionData,
@@ -61,7 +59,7 @@ pub async fn payloads(
         .ok_or_else(|| Error::new(ErrorType::MissingMetadata))?;
 
     let data = Operation::create_data(request.operations, metadata).await?;
-    let hex_bytes = encode_bytes_hex(data.to_bytes());
+    let hex_bytes = Hex::encode(data.to_bytes());
 
     Ok(ConstructionPayloadsResponse {
         unsigned_transaction: Hex::from_bytes(&data.to_bytes()),
@@ -208,13 +206,8 @@ pub async fn metadata(
             .state
             .get_owner_objects(Owner::AddressOwner(option.sender))?
             .iter()
-            .filter_map(|info| {
-                if info.type_ == GasCoin::type_().to_string() {
-                    Some(info.into())
-                } else {
-                    None
-                }
-            })
+            .filter(|info| info.type_.is_gas_coin())
+            .map(|info| info.into())
             .collect::<Vec<_>>()
     } else {
         Default::default()

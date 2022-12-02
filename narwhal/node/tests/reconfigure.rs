@@ -6,7 +6,6 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use config::{Committee, Parameters, SharedWorkerCache, WorkerCache, WorkerId};
-use consensus::ConsensusOutput;
 use crypto::{KeyPair, NetworkKeyPair, PublicKey};
 use executor::{ExecutionIndices, ExecutionState};
 use fastcrypto::traits::KeyPair as _;
@@ -24,7 +23,9 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{interval, sleep, Duration, MissedTickBehavior},
 };
+use types::ConsensusOutput;
 use types::{ReconfigureNotification, TransactionProto, TransactionsClient};
+use worker::TrivialTransactionValidator;
 
 /// A simple/dumb execution engine.
 struct SimpleExecutionState {
@@ -209,6 +210,7 @@ async fn restart() {
                 /* base_store_path */ test_utils::temp_dir(),
                 execution_state,
                 parameters,
+                TrivialTransactionValidator::default(),
                 rx_node_reconfigure,
                 &Registry::new(),
             )
@@ -334,6 +336,7 @@ async fn epoch_change() {
             worker_cache.clone(),
             &store,
             p,
+            TrivialTransactionValidator::default(),
             &Registry::new(),
         );
 

@@ -3,30 +3,29 @@
 
 use crate::authority::authority_store_tables::ExecutionIndicesWithHash;
 use crate::authority::AuthorityState;
-use crate::consensus_adapter::ConsensusListenerMessage;
+use crate::checkpoints::CheckpointService;
 use async_trait::async_trait;
-use narwhal_consensus::ConsensusOutput;
 use narwhal_executor::{ExecutionIndices, ExecutionState};
+use narwhal_types::{CommittedSubDag, ConsensusOutput};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use sui_types::messages::ConsensusTransaction;
-use tokio::sync::mpsc;
 use tracing::{debug, instrument, warn};
 
 pub struct ConsensusHandler {
     state: Arc<AuthorityState>,
-    sender: mpsc::Sender<ConsensusListenerMessage>,
     last_seen: Mutex<ExecutionIndicesWithHash>,
+    checkpoint_service: Arc<CheckpointService>,
 }
 
 impl ConsensusHandler {
-    pub fn new(state: Arc<AuthorityState>, sender: mpsc::Sender<ConsensusListenerMessage>) -> Self {
+    pub fn new(state: Arc<AuthorityState>, checkpoint_service: Arc<CheckpointService>) -> Self {
         let last_seen = Mutex::new(Default::default());
         Self {
             state,
-            sender,
             last_seen,
+            checkpoint_service,
         }
     }
 
@@ -103,23 +102,19 @@ impl ExecutionState for ConsensusHandler {
         };
         let verified_transaction = match self
             .state
-            .verify_consensus_transaction(sequenced_transaction)
+            .verify_consensus_transaction(consensus_output.as_ref(), sequenced_transaction)
         {
             Ok(verified_transaction) => verified_transaction,
             Err(()) => return,
         };
         self.state
-            .handle_consensus_transaction(verified_transaction)
+            .handle_consensus_transaction(
+                consensus_output.as_ref(),
+                verified_transaction,
+                &self.checkpoint_service,
+            )
             .await
             .expect("Unrecoverable error in consensus handler");
-        if self
-            .sender
-            .send(ConsensusListenerMessage::Processed(serialized_transaction))
-            .await
-            .is_err()
-        {
-            warn!("Consensus handler outbound channel closed");
-        }
     }
 
     #[instrument(level = "debug", skip_all, fields(result))]
@@ -138,15 +133,15 @@ impl ExecutionState for ConsensusHandler {
     }
 
     #[instrument(level = "trace", skip_all)]
-    async fn notify_commit_boundary(&self, consensus_output: &Arc<ConsensusOutput>) {
+    async fn notify_commit_boundary(&self, committed_dag: &Arc<CommittedSubDag>) {
         self.state
-            .handle_commit_boundary(consensus_output)
+            .handle_commit_boundary(committed_dag, &self.checkpoint_service)
             .expect("Unrecoverable error in consensus handler when processing commit boundary")
     }
 }
 
 pub struct SequencedConsensusTransaction {
-    pub consensus_output: Arc<narwhal_consensus::ConsensusOutput>,
+    pub consensus_output: Arc<narwhal_types::ConsensusOutput>,
     pub consensus_index: ExecutionIndicesWithHash,
     pub transaction: ConsensusTransaction,
 }
@@ -177,16 +172,19 @@ pub fn test_update_hash() {
         next_certificate_index: 0,
         next_batch_index: 0,
         next_transaction_index: 0,
+        last_committed_round: 0,
     };
     let index1 = ExecutionIndices {
         next_certificate_index: 0,
         next_batch_index: 1,
         next_transaction_index: 0,
+        last_committed_round: 0,
     };
     let index2 = ExecutionIndices {
         next_certificate_index: 0,
         next_batch_index: 2,
         next_transaction_index: 0,
+        last_committed_round: 0,
     };
 
     let last_seen = ExecutionIndicesWithHash {

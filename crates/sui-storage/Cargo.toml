@@ -14,8 +14,8 @@ fdlimit = "0.2.1"
 futures = "0.3.23"
 flexstr = "^0.9"
 serde = { version = "1.0.144", features = ["derive"] }
-serde_json = "1.0.83"
-tokio = { version = "1.20.1", features = ["full", "tracing"] }
+serde_json = "1.0.88"
+tokio = { workspace = true, features = ["full", "tracing"] }
 tokio-stream = "^0.1"
 rocksdb = "0.19.0"
 tracing = "0.1.36"
